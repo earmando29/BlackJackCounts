@@ -1,0 +1,11 @@
+services:
+  countmaster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: countmaster
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
