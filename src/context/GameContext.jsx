@@ -281,10 +281,14 @@ export const GameProvider = ({ children }) => {
     const newCards = [...hands[idx].cards, card]
     const val = calculateHandValue(newCards)
     const busted = val > 21
+    const is21 = val === 21
     const updated = hands.map((h, i) =>
-      i === idx ? { ...h, cards: newCards, result: busted ? `Bust! (${val})` : '' } : h
+      i === idx ? {
+        ...h, cards: newCards,
+        result: busted ? `Bust! (${val})` : is21 ? 'stood' : '',
+      } : h
     )
-    if (busted) advanceToNextHand(updated, shoe, dealerHand)
+    if (busted || is21) advanceToNextHand(updated, shoe, dealerHand)
     else setHands(updated)
   }, [gameStatus, activeHandIndex, cards, hands, dealerHand, ensureShoe, addToCount, advanceToNextHand])
 
