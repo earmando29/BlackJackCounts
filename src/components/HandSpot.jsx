@@ -34,11 +34,13 @@ const HandSpot = ({ index }) => {
   const hasCards = hand.cards.length > 0
   const handValue = hasCards ? calculateHandValue(hand.cards) : 0
 
-  const resultColor = {
-    'Win!': '#2ecc71', 'Blackjack!': '#2ecc71',
-    'Push': '#f1c40f', 'Bust': '#e74c3c',
-    'Lose': '#e74c3c', 'Dealer BJ': '#e74c3c',
-  }[hand.result] ?? '#fff'
+  const getResultColor = (result) => {
+    if (!result || result === 'stood') return '#fff'
+    if (result.startsWith('Win') || result.startsWith('Blackjack')) return '#2ecc71'
+    if (result.startsWith('Push')) return '#f1c40f'
+    return '#e74c3c' // Bust, Lose, Dealer BJ
+  }
+  const resultColor = getResultColor(hand.result)
 
   return (
     <div
@@ -87,7 +89,7 @@ const HandSpot = ({ index }) => {
             textAlign: 'center',
           }}>
             {hand.result && hand.result !== 'stood'
-              ? `${hand.result} (${handValue})`
+              ? hand.result
               : `Value: ${handValue}`
             }
           </div>

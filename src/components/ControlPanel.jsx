@@ -8,7 +8,7 @@ const ControlPanel = () => {
     bankroll, gameStatus, numSpots, setNumSpots,
     dealSpeed, setDealSpeed, dealInitialCards,
     playerHit, playerStand, playerDouble,
-    resetGame, loadSavedState, hands,
+    resetGame, loadSavedState, hands, activeHandIndex,
   } = useContext(GameContext)
 
   const [showLoadMenu, setShowLoadMenu] = useState(false)
@@ -98,7 +98,7 @@ const ControlPanel = () => {
           <ActionBtn onClick={playerHit} color="#4ecdc4" enabled>Hit</ActionBtn>
           <ActionBtn onClick={playerStand} color="#e67e22" enabled>Stand</ActionBtn>
           <ActionBtn onClick={playerDouble} color="#3498db"
-            enabled={hands[0]?.bet <= bankroll}>
+            enabled={hands[activeHandIndex]?.bet <= bankroll}>
             Double
           </ActionBtn>
         </div>

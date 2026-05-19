@@ -7,13 +7,13 @@ import {
 
 export const GameContext = createContext(null)
 
-const emptyHand = () => ({ cards: [], bet: 0, result: '' })
+const emptyHand = () => ({ cards: [], bet: 0, originalBet: 0, result: '' })
 const makeHands = () => [emptyHand(), emptyHand(), emptyHand()]
 
 export const GameProvider = ({ children }) => {
   const { createDeck } = useDeck()
   const saved = loadGameState()
-  const dealIdRef = useRef(0) // guard stale timeouts on reset
+  const dealIdRef = useRef(0)
 
   // --- Core state ---
   const [cards, setCards] = useState(() => saved?.cards ?? createDeck())
@@ -23,6 +23,7 @@ export const GameProvider = ({ children }) => {
   const [runningCount, setRunningCount] = useState(saved?.runningCount ?? 0)
   const [gameStatus, setGameStatus] = useState(saved?.gameStatus ?? 'betting')
   const [activeHandIndex, setActiveHandIndex] = useState(0)
+  const [totalBuyIn, setTotalBuyIn] = useState(saved?.totalBuyIn ?? 1000)
 
   // --- Settings ---
   const [numSpots, setNumSpots] = useState(saved?.numSpots ?? 1)
@@ -34,6 +35,10 @@ export const GameProvider = ({ children }) => {
   const decksRemaining = Math.max(1, Math.ceil(cards.length / 52))
   const trueCount = Math.round((runningCount / decksRemaining) * 10) / 10
   const speedMs = SPEED_MAP[dealSpeed] ?? 280
+
+  // --- Refs for stable access inside timeouts ---
+  const runningCountRef = useRef(runningCount)
+  useEffect(() => { runningCountRef.current = runningCount }, [runningCount])
 
   // Clear bets beyond numSpots when spots shrink
   useEffect(() => {
@@ -48,19 +53,29 @@ export const GameProvider = ({ children }) => {
     if (gameStatus === 'betting') {
       saveGameState({
         cards, hands, dealerHand, bankroll,
-        runningCount, gameStatus, numSpots, dealSpeed,
+        runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn,
       })
     }
-  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed])
+  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn])
 
   // ---- helpers ----
+
+  /** Always update running count — log for debugging. */
   const addToCount = useCallback((revealed) => {
-    const delta = getCountDelta(revealed)
-    if (delta !== 0) setRunningCount(prev => prev + delta)
+    if (!revealed || revealed.length === 0) return
+    const validCards = revealed.filter(c => c?.rank)
+    if (validCards.length === 0) return
+    const delta = getCountDelta(validCards)
+    setRunningCount(prev => {
+      const next = prev + delta
+      console.log(`[Count] ${validCards.map(c => c.rank).join(',')} → delta:${delta > 0 ? '+' : ''}${delta}  RC: ${prev}→${next}`)
+      return next
+    })
   }, [])
 
   const ensureShoe = useCallback((shoe, needed) => {
     if (shoe.length >= needed) return [...shoe]
+    console.log('[Shoe] Reshuffling — resetting count')
     setRunningCount(0)
     return createDeck()
   }, [createDeck])
@@ -69,15 +84,22 @@ export const GameProvider = ({ children }) => {
   const addChip = useCallback((amount) => {
     if (gameStatus !== 'betting' || selectedSpot >= numSpots) return
     setHands(prev => prev.map((h, i) =>
-      i === selectedSpot ? { ...h, bet: h.bet + amount } : h
+      i === selectedSpot ? { ...h, bet: h.bet + amount, originalBet: h.bet + amount } : h
     ))
   }, [gameStatus, selectedSpot, numSpots])
 
   const clearBet = useCallback((spotIdx) => {
     if (gameStatus !== 'betting') return
     setHands(prev => prev.map((h, i) =>
-      i === spotIdx ? { ...h, bet: 0 } : h
+      i === spotIdx ? { ...h, bet: 0, originalBet: 0 } : h
     ))
+  }, [gameStatus])
+
+  // ---- Rebuy ----
+  const rebuy = useCallback((amount = 1000) => {
+    if (gameStatus !== 'betting') return
+    setBankroll(prev => prev + amount)
+    setTotalBuyIn(prev => prev + amount)
   }, [gameStatus])
 
   // ---- Dealer turn (called when all player hands resolved) ----
@@ -100,13 +122,24 @@ export const GameProvider = ({ children }) => {
     setCards(remaining)
 
     const dVal = calculateHandValue(finalHand)
+    const dBust = dVal > 21
     let payout = 0
     const resolved = curHands.map((h, i) => {
       if (i >= numSpots || h.bet === 0 || h.result !== 'stood') return h
       const pVal = calculateHandValue(h.cards)
-      if (dVal > 21 || pVal > dVal) { payout += h.bet * 2; return { ...h, result: 'Win!' } }
-      if (pVal < dVal) return { ...h, result: 'Lose' }
-      payout += h.bet; return { ...h, result: 'Push' }
+      if (dBust) {
+        payout += h.bet * 2
+        return { ...h, result: `Win! ${pVal} vs Bust` }
+      }
+      if (pVal > dVal) {
+        payout += h.bet * 2
+        return { ...h, result: `Win! ${pVal} vs ${dVal}` }
+      }
+      if (pVal < dVal) {
+        return { ...h, result: `Lose ${pVal} vs ${dVal}` }
+      }
+      payout += h.bet
+      return { ...h, result: `Push ${pVal}` }
     })
 
     if (payout > 0) setBankroll(prev => prev + payout)
@@ -141,7 +174,10 @@ export const GameProvider = ({ children }) => {
     const need = (activeSlots.length + 1) * 2
     const shoe = ensureShoe(cards, need + 20)
 
-    const newHands = hands.map(h => ({ ...h, cards: [], result: '' }))
+    // Lock in originalBet at deal time
+    const newHands = hands.map(h => ({
+      ...h, cards: [], result: '', originalBet: h.bet,
+    }))
     const newDealer = []
     let order = 0
 
@@ -172,7 +208,7 @@ export const GameProvider = ({ children }) => {
     const id = ++dealIdRef.current
 
     setTimeout(() => {
-      if (dealIdRef.current !== id) return // stale (user reset mid-deal)
+      if (dealIdRef.current !== id) return
 
       const dVal = calculateHandValue(newDealer)
       const dealerBJ = dVal === 21 && newDealer.length === 2
@@ -180,13 +216,15 @@ export const GameProvider = ({ children }) => {
       let pay = 0
 
       if (dealerBJ) {
-        addToCount([newDealer.find(c => !c.flipped)])
+        const holeCard = newDealer.find(c => !c.flipped)
+        if (holeCard) addToCount([holeCard])
         setDealerHand(newDealer.map(c => ({ ...c, flipped: true, peeling: !c.flipped })))
         for (let i = 0; i < numSpots; i++) {
           if (updated[i].bet <= 0) continue
-          const pBJ = calculateHandValue(updated[i].cards) === 21 && updated[i].cards.length === 2
-          if (pBJ) { updated[i].result = 'Push'; pay += updated[i].bet }
-          else updated[i].result = 'Dealer BJ'
+          const pVal = calculateHandValue(updated[i].cards)
+          const pBJ = pVal === 21 && updated[i].cards.length === 2
+          if (pBJ) { updated[i].result = `Push ${pVal}`; pay += updated[i].bet }
+          else updated[i].result = `Dealer BJ — Lose ${pVal} vs 21`
         }
         if (pay > 0) setBankroll(prev => prev + pay)
         setHands(updated)
@@ -198,15 +236,17 @@ export const GameProvider = ({ children }) => {
       let allDone = true
       for (let i = 0; i < numSpots; i++) {
         if (updated[i].bet <= 0) continue
-        if (calculateHandValue(updated[i].cards) === 21 && updated[i].cards.length === 2) {
+        const pVal = calculateHandValue(updated[i].cards)
+        if (pVal === 21 && updated[i].cards.length === 2) {
           pay += updated[i].bet + updated[i].bet * 1.5
-          updated[i].result = 'Blackjack!'
+          updated[i].result = 'Blackjack! 🃏'
         } else { allDone = false }
       }
       if (pay > 0) setBankroll(prev => prev + pay)
 
       if (allDone) {
-        addToCount([newDealer.find(c => !c.flipped)])
+        const holeCard = newDealer.find(c => !c.flipped)
+        if (holeCard) addToCount([holeCard])
         setDealerHand(newDealer.map(c => ({ ...c, flipped: true })))
         setHands(updated)
         setGameStatus('finished')
@@ -225,14 +265,15 @@ export const GameProvider = ({ children }) => {
     if (gameStatus !== 'playing') return
     const idx = activeHandIndex
     const shoe = ensureShoe(cards, 1)
-    const card = { ...shoe.shift(), flipped: true }
+    const card = { ...shoe.shift(), flipped: true, dealOrder: 0 }
     setCards(shoe)
     addToCount([card])
 
     const newCards = [...hands[idx].cards, card]
-    const busted = calculateHandValue(newCards) > 21
+    const val = calculateHandValue(newCards)
+    const busted = val > 21
     const updated = hands.map((h, i) =>
-      i === idx ? { ...h, cards: newCards, result: busted ? 'Bust' : '' } : h
+      i === idx ? { ...h, cards: newCards, result: busted ? `Bust! (${val})` : '' } : h
     )
     if (busted) advanceToNextHand(updated, shoe, dealerHand)
     else setHands(updated)
@@ -253,15 +294,16 @@ export const GameProvider = ({ children }) => {
 
     setBankroll(prev => prev - hand.bet)
     const shoe = ensureShoe(cards, 1)
-    const card = { ...shoe.shift(), flipped: true }
+    const card = { ...shoe.shift(), flipped: true, dealOrder: 0 }
     setCards(shoe)
     addToCount([card])
 
     const newCards = [...hand.cards, card]
-    const busted = calculateHandValue(newCards) > 21
+    const val = calculateHandValue(newCards)
+    const busted = val > 21
     const updated = hands.map((h, i) =>
       i === activeHandIndex
-        ? { ...h, cards: newCards, bet: h.bet * 2, result: busted ? 'Bust' : 'stood' }
+        ? { ...h, cards: newCards, bet: h.bet * 2, result: busted ? `Bust! (${val})` : 'stood' }
         : h
     )
     advanceToNextHand(updated, shoe, dealerHand)
@@ -271,7 +313,13 @@ export const GameProvider = ({ children }) => {
   const newHand = useCallback(() => {
     dealIdRef.current++
     if (cards.length < 60) { setCards(createDeck()); setRunningCount(0) }
-    setHands(prev => prev.map(h => ({ ...h, cards: [], result: '' })))
+    // Restore original bet amounts (not doubled bets)
+    setHands(prev => prev.map(h => ({
+      ...h,
+      cards: [],
+      result: '',
+      bet: h.originalBet ?? h.bet,
+    })))
     setDealerHand([])
     setGameStatus('betting')
     setActiveHandIndex(0)
@@ -283,6 +331,7 @@ export const GameProvider = ({ children }) => {
     setHands(makeHands())
     setDealerHand([])
     setBankroll(1000)
+    setTotalBuyIn(1000)
     setRunningCount(0)
     setGameStatus('betting')
     setActiveHandIndex(0)
@@ -296,6 +345,7 @@ export const GameProvider = ({ children }) => {
     setHands(state.hands ?? makeHands())
     setDealerHand(state.dealerHand ?? [])
     setBankroll(state.bankroll ?? 1000)
+    setTotalBuyIn(state.totalBuyIn ?? state.bankroll ?? 1000)
     setRunningCount(state.runningCount ?? 0)
     setGameStatus(state.gameStatus ?? 'betting')
     setActiveHandIndex(0)
@@ -311,21 +361,21 @@ export const GameProvider = ({ children }) => {
   }), [])
 
   const value = useMemo(() => ({
-    cards, hands, dealerHand, bankroll,
+    cards, hands, dealerHand, bankroll, totalBuyIn,
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
     setNumSpots, setSelectedSpot, setDealSpeed, setShowCounts,
-    addChip, clearBet, dealInitialCards,
+    addChip, clearBet, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble,
     newHand, resetGame, loadSavedState,
     calculateHandValue,
   }), [
-    cards, hands, dealerHand, bankroll,
+    cards, hands, dealerHand, bankroll, totalBuyIn,
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
-    addChip, clearBet, dealInitialCards,
+    addChip, clearBet, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble,
     newHand, resetGame, loadSavedState,
   ])

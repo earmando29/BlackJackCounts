@@ -3,12 +3,14 @@ import { GameContext } from '../context/GameContext'
 
 const BankrollDisplay = () => {
   const {
-    bankroll, runningCount, trueCount, cards,
+    bankroll, runningCount, trueCount, cards, totalBuyIn,
     showCounts, setShowCounts, hands, numSpots,
+    gameStatus, rebuy,
   } = useContext(GameContext)
 
   const countColor = runningCount > 0 ? '#ff6b6b' : runningCount < 0 ? '#4ecdc4' : '#fff'
   const totalBet = hands.slice(0, numSpots).reduce((s, h) => s + h.bet, 0)
+  const netPL = bankroll - totalBuyIn
 
   return (
     <div style={{
@@ -25,9 +27,20 @@ const BankrollDisplay = () => {
         </span>
       </div>
 
+      <div>
+        <span style={{ color: '#aaa', fontSize: 11 }}>Buy-in: </span>
+        <span style={{ color: '#ccc', fontSize: 14 }}>${totalBuyIn}</span>
+        <span style={{
+          color: netPL >= 0 ? '#2ecc71' : '#e74c3c',
+          fontSize: 13, marginLeft: 6,
+        }}>
+          ({netPL >= 0 ? '+' : ''}{netPL.toFixed(0)})
+        </span>
+      </div>
+
       {totalBet > 0 && (
         <div>
-          <span style={{ color: '#aaa', fontSize: 13 }}>Total Bet: </span>
+          <span style={{ color: '#aaa', fontSize: 13 }}>Bet: </span>
           <span style={{ color: '#ffc220', fontSize: 17, fontWeight: 'bold' }}>${totalBet}</span>
         </div>
       )}
@@ -54,18 +67,34 @@ const BankrollDisplay = () => {
         </>
       )}
 
-      <button
-        onClick={() => setShowCounts(prev => !prev)}
-        style={{
-          padding: '4px 10px',
-          backgroundColor: showCounts ? '#e67e22' : '#555',
-          color: '#fff', border: 'none', borderRadius: 4,
-          cursor: 'pointer', fontSize: 11,
-        }}
-        aria-label="Toggle count display"
-      >
-        {showCounts ? '🙈 Hide Counts' : '👁 Show Counts'}
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {gameStatus === 'betting' && bankroll < 100 && (
+          <button
+            onClick={() => rebuy(1000)}
+            style={{
+              padding: '4px 10px',
+              backgroundColor: '#2ecc71', color: '#fff',
+              border: 'none', borderRadius: 4,
+              cursor: 'pointer', fontSize: 11, fontWeight: 'bold',
+            }}
+          >
+            💰 Rebuy $1000
+          </button>
+        )}
+
+        <button
+          onClick={() => setShowCounts(prev => !prev)}
+          style={{
+            padding: '4px 10px',
+            backgroundColor: showCounts ? '#e67e22' : '#555',
+            color: '#fff', border: 'none', borderRadius: 4,
+            cursor: 'pointer', fontSize: 11,
+          }}
+          aria-label="Toggle count display"
+        >
+          {showCounts ? '🙈 Hide Counts' : '👁 Show Counts'}
+        </button>
+      </div>
     </div>
   )
 }
