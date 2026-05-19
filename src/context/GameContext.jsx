@@ -4,6 +4,7 @@ import { saveGameState, loadGameState, saveSession } from '../utils/persistence'
 import {
   calculateHandValue, getCountDelta, dealerPlayOut, SPEED_MAP,
 } from '../utils/gameLogic'
+import { getRecommendation } from '../utils/strategy'
 
 export const GameContext = createContext(null)
 
@@ -35,6 +36,7 @@ export const GameProvider = ({ children }) => {
   const [bankrollAtDeal, setBankrollAtDeal] = useState(0)
   const [handHistory, setHandHistory] = useState(saved?.handHistory ?? [])
   const [reviewingRound, setReviewingRound] = useState(null)
+  const [sessionEV, setSessionEV] = useState(saved?.sessionEV ?? 0)
 
   // --- Settings ---
   const [numSpots, setNumSpots] = useState(saved?.numSpots ?? 1)
@@ -68,10 +70,10 @@ export const GameProvider = ({ children }) => {
     if (gameStatus === 'betting') {
       saveGameState({
         cards, hands, dealerHand, bankroll,
-        runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory,
+        runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory, sessionEV,
       })
     }
-  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory])
+  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory, sessionEV])
 
   // ---- helpers ----
   const addToCount = useCallback((revealed) => {
@@ -355,13 +357,26 @@ export const GameProvider = ({ children }) => {
   const newHand = useCallback(() => {
     dealIdRef.current++
 
-    // Push completed round to history (only if we actually played)
+    // Push completed round to history + accumulate EV
     if (dealerHand.length > 0) {
+      const dealerUp = dealerHand[0]
+      let roundEV = 0
+      const activeHands = hands.filter(h => h.bet > 0)
+      for (const h of activeHands) {
+        const initCards = h.cards.slice(0, 2)
+        if (initCards.length < 2 || !dealerUp) continue
+        const rec = getRecommendation(initCards, dealerUp, 0, {
+          canDouble: true, canSplit: false, bet: h.bet,
+        })
+        if (rec) roundEV += rec.ev.dollar
+      }
+      setSessionEV(prev => prev + roundEV)
       setHandHistory(prev => [...prev, {
         handNumber: prev.length + 1,
         dealerHand: dealerHand.map(c => ({ ...c, flipped: true })),
-        playerHands: hands.filter(h => h.bet > 0).map(h => ({ ...h })),
+        playerHands: activeHands.map(h => ({ ...h })),
         roundNet: bankroll - bankrollAtDeal,
+        roundEV,
         runningCount,
         timestamp: new Date().toISOString(),
       }])
@@ -400,15 +415,16 @@ export const GameProvider = ({ children }) => {
     setHandHistory([])
     setReviewingRound(null)
     setBankrollAtDeal(0)
+    setSessionEV(0)
   }, [createDeck])
 
   // ---- Save / History ----
   const saveGame = useCallback(() => {
     saveSession({
       cards, hands, dealerHand, bankroll,
-      runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory,
+      runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory, sessionEV,
     })
-  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory])
+  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory, sessionEV])
 
   const viewHistoryRound = useCallback((index) => {
     if (index >= 0 && index < handHistory.length) {
@@ -429,6 +445,7 @@ export const GameProvider = ({ children }) => {
     setRunningCount(state.runningCount ?? 0)
     setGameStatus(state.gameStatus ?? 'betting')
     setHandHistory(state.handHistory ?? [])
+    setSessionEV(state.sessionEV ?? 0)
     setActiveHandIndex(0)
     setSelectedSpot(0)
     setReviewingRound(null)
@@ -447,7 +464,7 @@ export const GameProvider = ({ children }) => {
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
-    roundNet, discardCount, handHistory, reviewingRound,
+    roundNet, discardCount, handHistory, reviewingRound, sessionEV,
     setNumSpots, setSelectedSpot, setDealSpeed, setShowCounts,
     showAdvisor, setShowAdvisor,
     addChip, clearBet, betAllSpots, dealInitialCards, rebuy,
@@ -460,7 +477,7 @@ export const GameProvider = ({ children }) => {
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
-    roundNet, discardCount, handHistory, reviewingRound,
+    roundNet, discardCount, handHistory, reviewingRound, sessionEV,
     showAdvisor, setShowAdvisor,
     addChip, clearBet, betAllSpots, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble, playerSplit,

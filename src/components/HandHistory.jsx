@@ -64,6 +64,14 @@ const HandHistory = () => {
                 <span style={{ color: netColor, fontWeight: 'bold' }}>
                   {round.roundNet >= 0 ? '+' : ''}${round.roundNet.toFixed(0)}
                 </span>
+                {round.roundEV != null && (
+                  <span style={{
+                    color: round.roundEV >= 0 ? '#2ecc71' : '#e74c3c',
+                    fontSize: 10,
+                  }}>
+                    EV:{round.roundEV >= 0 ? '+' : ''}{round.roundEV.toFixed(1)}
+                  </span>
+                )}
                 <span style={{ color: '#888', fontSize: 10 }}>
                   RC:{round.runningCount}
                 </span>
