@@ -11,7 +11,8 @@ const ControlPanel = () => {
     dealSpeed, setDealSpeed, dealInitialCards,
     playerHit, playerStand, playerDouble, playerSplit,
     resetGame, loadSavedState, saveGame,
-    hands, activeHandIndex, dealerHand, trueCount,
+    hands, activeHandIndex, dealerHand, trueCount, selectedSpot,
+    showAdvisor, setShowAdvisor, betAllSpots,
   } = useContext(GameContext)
 
   const [showLoadMenu, setShowLoadMenu] = useState(false)
@@ -24,9 +25,9 @@ const ControlPanel = () => {
   const totalBets = hands.slice(0, numSpots).reduce((s, h) => s + h.bet, 0)
   const canDeal = isBetting && totalBets > 0 && totalBets <= bankroll
 
-  // ---- Compute recommendation for button highlighting ----
+  // Only compute recommendation when advisor is ON
   const rec = useMemo(() => {
-    if (!isPlaying || !dealerHand.length) return null
+    if (!isPlaying || !showAdvisor || !dealerHand.length) return null
     const hand = hands[activeHandIndex]
     if (!hand?.cards.length) return null
     const canD = hand.cards.length === 2 && hand.bet <= bankroll
@@ -34,8 +35,10 @@ const ControlPanel = () => {
       && hand.cards[0]?.value === hand.cards[1]?.value
       && hand.originalBet <= bankroll
       && hands.filter(h => h.spotIndex === hand.spotIndex).length < 5
-    return getRecommendation(hand.cards, dealerHand[0], trueCount, { canDouble: canD, canSplit: canSp })
-  }, [isPlaying, hands, activeHandIndex, dealerHand, trueCount, bankroll])
+    return getRecommendation(hand.cards, dealerHand[0], trueCount, {
+      canDouble: canD, canSplit: canSp, bet: hand.bet,
+    })
+  }, [isPlaying, showAdvisor, hands, activeHandIndex, dealerHand, trueCount, bankroll])
 
   // ---- Load ----
   const handleShowLoad = () => { setSavedSessions(getSessions()); setShowLoadMenu(true) }
@@ -50,6 +53,10 @@ const ControlPanel = () => {
     }
     reader.readAsText(file)
   }
+
+  // Can we show "Bet All" button?
+  const selectedBet = hands[selectedSpot]?.bet ?? 0
+  const showBetAll = isBetting && numSpots > 1 && selectedBet > 0
 
   return (
     <div style={{
@@ -81,6 +88,12 @@ const ControlPanel = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 6 }}>
+          <SmallBtn
+            onClick={() => setShowAdvisor(p => !p)}
+            color={showAdvisor ? '#e67e22' : '#555'}
+          >
+            {showAdvisor ? '🧠 EV On' : '🧠 EV Off'}
+          </SmallBtn>
           <SmallBtn onClick={() => { saveGame(); setSaveFlash(true); setTimeout(() => setSaveFlash(false), 1200) }} color={saveFlash ? '#2ecc71' : '#3498db'}>
             {saveFlash ? '✓ Saved' : '💾 Save'}
           </SmallBtn>
@@ -103,9 +116,16 @@ const ControlPanel = () => {
           alignItems: 'center',
         }}>
           <ChipBetting />
-          <ActionBtn onClick={dealInitialCards} color="#27ae60" enabled={canDeal}>
-            Deal
-          </ActionBtn>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <ActionBtn onClick={dealInitialCards} color="#27ae60" enabled={canDeal}>
+              Deal
+            </ActionBtn>
+            {showBetAll && (
+              <ActionBtn onClick={betAllSpots} color="#3498db" enabled>
+                Bet All ${selectedBet}
+              </ActionBtn>
+            )}
+          </div>
         </div>
       )}
 

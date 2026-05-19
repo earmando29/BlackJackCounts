@@ -41,6 +41,7 @@ export const GameProvider = ({ children }) => {
   const [selectedSpot, setSelectedSpot] = useState(0)
   const [dealSpeed, setDealSpeed] = useState(saved?.dealSpeed ?? 3)
   const [showCounts, setShowCounts] = useState(false)
+  const [showAdvisor, setShowAdvisor] = useState(false)
 
   // --- Derived ---
   const decksRemaining = Math.max(1, Math.ceil(cards.length / 52))
@@ -108,6 +109,16 @@ export const GameProvider = ({ children }) => {
       i === spotIdx ? { ...h, bet: 0, originalBet: 0 } : h
     ))
   }, [gameStatus])
+
+  /** Copy the selected spot's bet to all active spots. */
+  const betAllSpots = useCallback(() => {
+    if (gameStatus !== 'betting') return
+    const sourceBet = hands[selectedSpot]?.bet ?? 0
+    if (sourceBet <= 0) return
+    setHands(prev => prev.map((h, i) =>
+      i < numSpots ? { ...h, bet: sourceBet, originalBet: sourceBet } : h
+    ))
+  }, [gameStatus, hands, selectedSpot, numSpots])
 
   const rebuy = useCallback((amount = 1000) => {
     if (gameStatus !== 'betting') return
@@ -438,7 +449,8 @@ export const GameProvider = ({ children }) => {
     dealSpeed, showCounts, speedMs, theme,
     roundNet, discardCount, handHistory, reviewingRound,
     setNumSpots, setSelectedSpot, setDealSpeed, setShowCounts,
-    addChip, clearBet, dealInitialCards, rebuy,
+    showAdvisor, setShowAdvisor,
+    addChip, clearBet, betAllSpots, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble, playerSplit,
     newHand, resetGame, loadSavedState, saveGame,
     viewHistoryRound, exitHistoryView,
@@ -449,7 +461,8 @@ export const GameProvider = ({ children }) => {
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
     roundNet, discardCount, handHistory, reviewingRound,
-    addChip, clearBet, dealInitialCards, rebuy,
+    showAdvisor, setShowAdvisor,
+    addChip, clearBet, betAllSpots, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble, playerSplit,
     newHand, resetGame, loadSavedState, saveGame,
     viewHistoryRound, exitHistoryView,

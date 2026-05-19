@@ -6,17 +6,17 @@ const ACTION_EMOJI = { H: '👆', S: '✋', D: '💰', P: '✂️', d: '💰' }
 const ACTION_LABELS = { H: 'Hit', S: 'Stand', D: 'Double', P: 'Split', d: 'Double' }
 
 /**
- * EV Advisor — shows optimal play for the current hand.
- * Always visible during play. Deviation alerts when counts toggled on.
+ * EV Advisor — shows optimal play + numeric EV for the current hand.
+ * Toggled off by default (showAdvisor).
  */
 const EvAdvisor = () => {
   const {
     hands, activeHandIndex, dealerHand, trueCount,
-    gameStatus, bankroll, showCounts,
+    gameStatus, bankroll, showCounts, showAdvisor,
   } = useContext(GameContext)
 
   const rec = useMemo(() => {
-    if (gameStatus !== 'playing' || !dealerHand.length) return null
+    if (gameStatus !== 'playing' || !dealerHand.length || !showAdvisor) return null
     const hand = hands[activeHandIndex]
     if (!hand?.cards.length) return null
 
@@ -27,14 +27,19 @@ const EvAdvisor = () => {
       && hand.originalBet <= bankroll
       && hands.filter(h => h.spotIndex === hand.spotIndex).length < 5
 
-    return getRecommendation(hand.cards, dealerUpcard, trueCount, { canDouble, canSplit })
-  }, [hands, activeHandIndex, dealerHand, trueCount, gameStatus, bankroll])
+    return getRecommendation(hand.cards, dealerUpcard, trueCount, {
+      canDouble, canSplit, bet: hand.bet,
+    })
+  }, [hands, activeHandIndex, dealerHand, trueCount, gameStatus, bankroll, showAdvisor])
 
   if (!rec) return null
 
   const emoji = ACTION_EMOJI[rec.action] ?? ''
   const label = ACTION_LABELS[rec.action] ?? rec.action
   const hasDeviation = rec.deviation && showCounts
+  const evPct = (rec.ev.perUnit * 100).toFixed(1)
+  const evSign = rec.ev.perUnit >= 0 ? '+' : ''
+  const evDollar = rec.ev.dollar >= 0 ? `+$${rec.ev.dollar.toFixed(2)}` : `-$${Math.abs(rec.ev.dollar).toFixed(2)}`
 
   return (
     <div style={{
@@ -62,6 +67,22 @@ const EvAdvisor = () => {
         )}
       </div>
 
+      {/* Numeric EV line */}
+      <div style={{
+        display: 'flex', gap: 12, fontSize: 12, color: '#ccc',
+      }}>
+        <span>
+          EV: <span style={{ color: rec.ev.color, fontWeight: 'bold' }}>
+            {evSign}{evPct}%
+          </span>
+        </span>
+        <span>
+          Exp: <span style={{ color: rec.ev.color, fontWeight: 'bold' }}>
+            {evDollar}
+          </span>
+        </span>
+      </div>
+
       {/* Deviation alert */}
       {hasDeviation && (
         <div style={{
@@ -76,9 +97,4 @@ const EvAdvisor = () => {
 }
 
 export default EvAdvisor
-
-/**
- * Returns the recommended action code for button highlighting.
- * Separated so ControlPanel can use it without importing the full component.
- */
 export { getRecommendation }

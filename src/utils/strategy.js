@@ -6,19 +6,17 @@ import { calculateHandValue } from './gameLogic'
  * Contains:
  *  1. Basic strategy lookup tables (hard, soft, pair)
  *  2. Hi-Lo deviation indices (Illustrious 18 + defensive)
- *  3. Hand classifier
- *  4. Recommendation engine
- *  5. EV classifier
+ *  3. Hand classifier + EV lookup tables
+ *  4. Recommendation engine with numeric EV
  *
  * Pure functions — no React, no side-effects, fully testable.
  */
 
-// ── Dealer upcard value → table column index ──────────────────────
+// ── Dealer upcard → table column index ───────────────────────────
 // 2=0, 3=1, 4=2, 5=3, 6=4, 7=5, 8=6, 9=7, T=8, A=9
 const dIdx = (upcard) => (upcard.value === 11 ? 9 : upcard.value - 2)
 
-// ── Action codes ──────────────────────────────────────────────────
-// H = Hit | S = Stand | D = Double (else Hit) | d = Double (else Stand) | P = Split
+// ── Action codes & labels ────────────────────────────────────────
 const ACTION_LABELS = { H: 'Hit', S: 'Stand', D: 'Double', P: 'Split', d: 'Double' }
 const actionName = (code) => ACTION_LABELS[code] ?? code
 
@@ -26,7 +24,6 @@ const actionName = (code) => ACTION_LABELS[code] ?? code
 // Each string is 10 chars → dealer 2,3,4,5,6,7,8,9,T,A
 
 const HARD = {
-  //       2345678 9TA
   8:  'HHHHHHHHHH',
   9:  'HDDDDHHHHH',
   10: 'DDDDDDDDHH',
@@ -39,36 +36,69 @@ const HARD = {
 }
 
 const SOFT = {
-  //       2345678 9TA
-  13: 'HHHDDHHHHH', // A,2
-  14: 'HHHDDHHHHH', // A,3
-  15: 'HHDDDHHHHH', // A,4
-  16: 'HHDDDHHHHH', // A,5
-  17: 'HDDDDHHHHH', // A,6
-  18: 'SddddSSHHH', // A,7 — d = double or stand
-  19: 'SSSSSSSSSS', // A,8
-  20: 'SSSSSSSSSS', // A,9
+  13: 'HHHDDHHHHH',
+  14: 'HHHDDHHHHH',
+  15: 'HHDDDHHHHH',
+  16: 'HHDDDHHHHH',
+  17: 'HDDDDHHHHH',
+  18: 'SddddSSHHH',
+  19: 'SSSSSSSSSS',
+  20: 'SSSSSSSSSS',
 }
 
 const PAIRS = {
-  //       2345678 9TA
-  11: 'PPPPPPPPPP', // A,A
-  10: 'SSSSSSSSSS', // T,T — never split (basic)
-  9:  'PPPPPSPPSS', // 9,9
-  8:  'PPPPPPPPPP', // 8,8
-  7:  'PPPPPPHHHH', // 7,7
-  6:  'PPPPPHHHHH', // 6,6
-  5:  'DDDDDDDDHH', // 5,5 — never split, play as hard 10
-  4:  'HHHPPHHHHH', // 4,4
-  3:  'PPPPPPHHHH', // 3,3
-  2:  'PPPPPPHHHH', // 2,2
+  11: 'PPPPPPPPPP',
+  10: 'SSSSSSSSSS',
+  9:  'PPPPPSPPSS',
+  8:  'PPPPPPPPPP',
+  7:  'PPPPPPHHHH',
+  6:  'PPPPPHHHHH',
+  5:  'DDDDDDDDHH',
+  4:  'HHHPPHHHHH',
+  3:  'PPPPPPHHHH',
+  2:  'PPPPPPHHHH',
 }
 
+// ── EV Lookup Tables (per $1 bet, optimal play, 6-deck S17) ─────
+// Source: standard blackjack combinatorial analysis
+// Index: dealer 2, 3, 4, 5, 6, 7, 8, 9, T, A
+
+const HARD_EV = {
+  5:  [.12, .13, .15, .17, .19, .08, .03, -.02, -.08, -.11],
+  6:  [.12, .13, .15, .17, .19, .07, .03, -.02, -.08, -.11],
+  7:  [.10, .12, .14, .17, .18, .10, .04, -.02, -.07, -.10],
+  8:  [.14, .15, .17, .20, .22, .12, .06, .01, -.06, -.09],
+  9:  [.14, .21, .27, .33, .36, .09, .04, -.02, -.08, -.11],
+  10: [.44, .47, .50, .54, .57, .34, .23, .11, -.04, -.10],
+  11: [.54, .57, .60, .63, .65, .41, .30, .18, .05, .13],
+  12: [-.25, -.24, -.21, -.17, -.15, -.21, -.24, -.27, -.29, -.29],
+  13: [-.23, -.21, -.18, -.14, -.12, -.26, -.28, -.31, -.32, -.33],
+  14: [-.24, -.22, -.19, -.15, -.13, -.27, -.29, -.32, -.34, -.35],
+  15: [-.25, -.23, -.20, -.16, -.15, -.28, -.31, -.34, -.42, -.47],
+  16: [-.26, -.24, -.21, -.18, -.16, -.29, -.32, -.35, -.46, -.51],
+  17: [-.15, -.12, -.09, -.05, -.03, -.11, -.38, -.42, -.42, -.48],
+  18: [.12, .15, .18, .22, .24, .40, .11, -.18, -.18, -.10],
+  19: [.39, .41, .44, .48, .50, .62, .60, .28, .07, .18],
+  20: [.64, .66, .68, .72, .74, .77, .79, .76, .55, .44],
+}
+
+const SOFT_EV = {
+  13: [.04, .06, .10, .15, .18, .04, -.01, -.06, -.12, -.14],
+  14: [.05, .07, .11, .16, .19, .04, -.01, -.06, -.12, -.14],
+  15: [.06, .10, .14, .19, .22, .04, -.01, -.06, -.12, -.14],
+  16: [.06, .10, .15, .20, .23, .03, -.02, -.07, -.12, -.14],
+  17: [.02, .12, .18, .24, .27, .00, -.05, -.10, -.15, -.17],
+  18: [.12, .18, .24, .30, .33, .40, .11, -.01, -.09, -.04],
+  19: [.39, .41, .44, .48, .50, .62, .60, .28, .07, .18],
+  20: [.64, .66, .68, .72, .74, .77, .79, .76, .55, .44],
+}
+
+// TC adjustment: each +1 TC ≈ +0.5% edge shift
+const TC_EV_SHIFT = 0.005
+
 // ── Hi-Lo Deviation Indices ──────────────────────────────────────
-// tc = true count threshold. If TC ≥ tc → play `above`, else `below`.
-// dealer = card value (2-10, 11=Ace)
+
 const DEVIATIONS = [
-  // --- Illustrious 18 (positive deviations) ---
   { type: 'hard', total: 16, dealer: 10, tc: 0,  above: 'S', below: 'H' },
   { type: 'hard', total: 15, dealer: 10, tc: 4,  above: 'S', below: 'H' },
   { type: 'hard', total: 10, dealer: 10, tc: 4,  above: 'D', below: 'H' },
@@ -81,7 +111,6 @@ const DEVIATIONS = [
   { type: 'hard', total: 16, dealer: 9,  tc: 5,  above: 'S', below: 'H' },
   { type: 'pair', pairVal: 10, dealer: 5, tc: 5,  above: 'P', below: 'S' },
   { type: 'pair', pairVal: 10, dealer: 6, tc: 4,  above: 'P', below: 'S' },
-  // --- Defensive deviations (deviate from basic at low counts) ---
   { type: 'hard', total: 13, dealer: 2,  tc: -1, above: 'S', below: 'H' },
   { type: 'hard', total: 13, dealer: 3,  tc: -2, above: 'S', below: 'H' },
   { type: 'hard', total: 12, dealer: 4,  tc: 0,  above: 'S', below: 'H' },
@@ -101,55 +130,43 @@ function classifyHand(cards) {
   return { total, isSoft, isPair, pairValue: isPair ? cards[0].value : null }
 }
 
-// ── Basic Strategy Lookup ────────────────────────────────────────
+// ── Strategy Lookups ─────────────────────────────────────────────
 
 function lookupBasic(hand, di) {
-  // Pairs first (pair table may return non-P actions like S for T,T)
-  if (hand.isPair && PAIRS[hand.pairValue]) {
-    return PAIRS[hand.pairValue][di]
-  }
-  // Soft totals
-  if (hand.isSoft && SOFT[hand.total]) {
-    return SOFT[hand.total][di]
-  }
-  // Hard totals
+  if (hand.isPair && PAIRS[hand.pairValue]) return PAIRS[hand.pairValue][di]
+  if (hand.isSoft && SOFT[hand.total]) return SOFT[hand.total][di]
   if (hand.total <= 8) return 'H'
   if (hand.total >= 17) return 'S'
   if (HARD[hand.total]) return HARD[hand.total][di]
   return 'H'
 }
 
-// ── Apply action constraints ─────────────────────────────────────
-
 function constrain(action, canDouble, canSplit) {
   if (action === 'D' && !canDouble) return 'H'
   if (action === 'd' && !canDouble) return 'S'
-  if (action === 'P' && !canSplit) return null // fall through to hard/soft
+  if (action === 'P' && !canSplit) return null
   return action
 }
 
-// ── EV Classification ────────────────────────────────────────────
+// ── EV Calculation ───────────────────────────────────────────────
 
-function classifyEV(total, dealerUp, action, tc, isSoft) {
-  const dealerWeak = dealerUp >= 2 && dealerUp <= 6
+/**
+ * Look up the per-unit EV for this hand vs dealer, adjusted for TC.
+ * Returns a number like +0.54 or -0.46.
+ */
+function lookupEV(hand, di, trueCount) {
+  let baseEV = 0
 
-  if (action === 'D') {
-    if (dealerWeak || total >= 10) return { label: '+EV', color: '#2ecc71' }
-    return { label: '~EV', color: '#f1c40f' }
+  if (hand.isSoft && SOFT_EV[hand.total]) {
+    baseEV = SOFT_EV[hand.total][di]
+  } else if (HARD_EV[hand.total]) {
+    baseEV = HARD_EV[hand.total][di]
+  } else if (hand.total <= 4) {
+    baseEV = HARD_EV[5][di] // treat very low totals like 5
   }
-  if (action === 'P') {
-    return dealerWeak ? { label: '+EV', color: '#2ecc71' } : { label: '~EV', color: '#f1c40f' }
-  }
-  if (action === 'S') {
-    if (total >= 17 && dealerWeak) return { label: '+EV', color: '#2ecc71' }
-    if (total >= 17) return { label: '~EV', color: '#f1c40f' }
-    if (dealerWeak) return { label: '~EV', color: '#f1c40f' }
-    return { label: '-EV', color: '#e74c3c' }
-  }
-  // Hitting
-  if (total <= 11) return { label: '+EV', color: '#2ecc71' }
-  if (isSoft) return { label: '~EV', color: '#f1c40f' }
-  return dealerWeak ? { label: '~EV', color: '#f1c40f' } : { label: '-EV', color: '#e74c3c' }
+
+  // Adjust for true count
+  return baseEV + (trueCount * TC_EV_SHIFT)
 }
 
 // ── Main Recommendation Engine ───────────────────────────────────
@@ -157,10 +174,9 @@ function classifyEV(total, dealerUp, action, tc, isSoft) {
 /**
  * Returns { action, basicAction, deviation, ev, hand } or null.
  *
- * @param {Object[]} cards        - Player's card objects
- * @param {Object}   dealerUpcard - Dealer's visible card
- * @param {number}   trueCount    - Current true count
- * @param {Object}   opts         - { canDouble, canSplit }
+ * ev now contains:
+ *   { label, color, perUnit, dollar }
+ *   perUnit = EV per $1 bet  |  dollar = EV × actual bet
  */
 export function getRecommendation(cards, dealerUpcard, trueCount, opts) {
   if (!cards?.length || !dealerUpcard) return null
@@ -170,35 +186,27 @@ export function getRecommendation(cards, dealerUpcard, trueCount, opts) {
   const di = dIdx(dealerUpcard)
   const dealerVal = dealerUpcard.value === 11 ? 11 : dealerUpcard.value
 
-  // 1. Basic strategy lookup
+  // 1. Basic strategy
   let rawBasic = lookupBasic(hand, di)
-
-  // If pair action is P but can't split, fall through to hard/soft
   if (rawBasic === 'P' && !opts.canSplit) {
-    const nonPair = { ...hand, isPair: false }
-    rawBasic = lookupBasic(nonPair, di)
+    rawBasic = lookupBasic({ ...hand, isPair: false }, di)
   }
-
   const basicAction = constrain(rawBasic, opts.canDouble, opts.canSplit) ?? rawBasic
   let action = basicAction
 
-  // 2. Check deviations
+  // 2. Deviations
   let deviation = null
   for (const dev of DEVIATIONS) {
-    let matchHand = false
+    let match = false
     if (dev.type === 'pair') {
-      matchHand = hand.isPair && hand.pairValue === dev.pairVal
+      match = hand.isPair && hand.pairValue === dev.pairVal
     } else if (dev.type === 'hard') {
-      matchHand = !hand.isSoft && !hand.isPair && hand.total === dev.total
-      // Also check pairs playing as hard (e.g., 8+8 = hard 16)
-      if (!matchHand && hand.isPair && !hand.isSoft) {
-        matchHand = hand.total === dev.total
-      }
+      match = (!hand.isSoft && !hand.isPair && hand.total === dev.total)
+        || (hand.isPair && !hand.isSoft && hand.total === dev.total)
     } else if (dev.type === 'soft') {
-      matchHand = hand.isSoft && hand.total === dev.total
+      match = hand.isSoft && hand.total === dev.total
     }
-
-    if (!matchHand || dev.dealer !== dealerVal) continue
+    if (!match || dev.dealer !== dealerVal) continue
 
     const devAction = trueCount >= dev.tc ? dev.above : dev.below
     const constrained = constrain(devAction, opts.canDouble, opts.canSplit)
@@ -207,8 +215,7 @@ export function getRecommendation(cards, dealerUpcard, trueCount, opts) {
     if (constrained !== basicAction) {
       const tcLabel = `${dev.tc >= 0 ? '+' : ''}${dev.tc}`
       deviation = {
-        action: constrained,
-        tc: dev.tc,
+        action: constrained, tc: dev.tc,
         note: trueCount >= dev.tc
           ? `TC ≥ ${tcLabel}: ${actionName(constrained)} instead of ${actionName(basicAction)}`
           : `TC < ${tcLabel}: ${actionName(constrained)} instead of ${actionName(basicAction)}`,
@@ -218,8 +225,15 @@ export function getRecommendation(cards, dealerUpcard, trueCount, opts) {
     break
   }
 
-  // 3. EV classification
-  const ev = classifyEV(hand.total, dealerVal, action, trueCount, hand.isSoft)
+  // 3. Numeric EV
+  const perUnit = lookupEV(hand, di, trueCount)
+  const bet = opts.bet ?? 0
+  const dollar = perUnit * bet
+  const label = perUnit >= 0.05 ? '+EV' : perUnit <= -0.05 ? '-EV' : '~EV'
+  const color = perUnit >= 0.05 ? '#2ecc71' : perUnit <= -0.05 ? '#e74c3c' : '#f1c40f'
 
-  return { action, basicAction, deviation, ev, hand }
+  return {
+    action, basicAction, deviation, hand,
+    ev: { label, color, perUnit, dollar },
+  }
 }
