@@ -1,6 +1,8 @@
-import { useContext, useState } from 'react'
+import { useContext, useState, useMemo } from 'react'
 import { GameContext } from '../context/GameContext'
 import { getSessions } from '../utils/persistence'
+import { getRecommendation } from '../utils/strategy'
+import EvAdvisor from './EvAdvisor'
 import ChipBetting from './ChipBetting'
 
 const ControlPanel = () => {
@@ -8,7 +10,8 @@ const ControlPanel = () => {
     bankroll, gameStatus, numSpots, setNumSpots,
     dealSpeed, setDealSpeed, dealInitialCards,
     playerHit, playerStand, playerDouble, playerSplit,
-    resetGame, loadSavedState, saveGame, hands, activeHandIndex,
+    resetGame, loadSavedState, saveGame,
+    hands, activeHandIndex, dealerHand, trueCount,
   } = useContext(GameContext)
 
   const [showLoadMenu, setShowLoadMenu] = useState(false)
@@ -20,6 +23,19 @@ const ControlPanel = () => {
   const isDealing = gameStatus === 'dealing'
   const totalBets = hands.slice(0, numSpots).reduce((s, h) => s + h.bet, 0)
   const canDeal = isBetting && totalBets > 0 && totalBets <= bankroll
+
+  // ---- Compute recommendation for button highlighting ----
+  const rec = useMemo(() => {
+    if (!isPlaying || !dealerHand.length) return null
+    const hand = hands[activeHandIndex]
+    if (!hand?.cards.length) return null
+    const canD = hand.cards.length === 2 && hand.bet <= bankroll
+    const canSp = hand.cards.length === 2
+      && hand.cards[0]?.value === hand.cards[1]?.value
+      && hand.originalBet <= bankroll
+      && hands.filter(h => h.spotIndex === hand.spotIndex).length < 5
+    return getRecommendation(hand.cards, dealerHand[0], trueCount, { canDouble: canD, canSplit: canSp })
+  }, [isPlaying, hands, activeHandIndex, dealerHand, trueCount, bankroll])
 
   // ---- Load ----
   const handleShowLoad = () => { setSavedSessions(getSessions()); setShowLoadMenu(true) }
@@ -45,7 +61,6 @@ const ControlPanel = () => {
         display: 'flex', justifyContent: 'space-between',
         alignItems: 'center', flexWrap: 'wrap', gap: 8,
       }}>
-        {/* Spots selector */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ color: '#aaa', fontSize: 12 }}>Spots:</span>
           {[1, 2, 3].map(n => (
@@ -56,7 +71,6 @@ const ControlPanel = () => {
           ))}
         </div>
 
-        {/* Speed selector */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ color: '#aaa', fontSize: 12 }}>Speed:</span>
           {[1, 2, 3, 4, 5].map(s => (
@@ -66,7 +80,6 @@ const ControlPanel = () => {
           ))}
         </div>
 
-        {/* Utility buttons */}
         <div style={{ display: 'flex', gap: 6 }}>
           <SmallBtn onClick={() => { saveGame(); setSaveFlash(true); setTimeout(() => setSaveFlash(false), 1200) }} color={saveFlash ? '#2ecc71' : '#3498db'}>
             {saveFlash ? '✓ Saved' : '💾 Save'}
@@ -83,7 +96,7 @@ const ControlPanel = () => {
           onClose={() => setShowLoadMenu(false)} />
       )}
 
-      {/* Chip betting (only during betting phase) */}
+      {/* Chip betting */}
       {isBetting && (
         <div style={{
           display: 'flex', flexDirection: 'column', gap: 8,
@@ -96,7 +109,7 @@ const ControlPanel = () => {
         </div>
       )}
 
-      {/* Playing controls */}
+      {/* Playing controls + EV advisor */}
       {isPlaying && (() => {
         const hand = hands[activeHandIndex]
         const canDouble = hand?.cards.length === 2 && hand?.bet <= bankroll
@@ -104,21 +117,33 @@ const ControlPanel = () => {
           && hand?.cards[0]?.value === hand?.cards[1]?.value
           && hand?.originalBet <= bankroll
           && hands.filter(h => h.spotIndex === hand?.spotIndex).length < 5
+
+        const recAction = rec?.action
         return (
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <ActionBtn onClick={playerHit} color="#4ecdc4" enabled>Hit</ActionBtn>
-            <ActionBtn onClick={playerStand} color="#e67e22" enabled>Stand</ActionBtn>
-            <ActionBtn onClick={playerDouble} color="#3498db" enabled={canDouble}>
-              Double
-            </ActionBtn>
-            <ActionBtn onClick={playerSplit} color="#9b59b6" enabled={canSplit}>
-              Split
-            </ActionBtn>
-          </div>
+          <>
+            <EvAdvisor />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <ActionBtn onClick={playerHit} color="#4ecdc4" enabled
+                recommended={recAction === 'H'}>
+                Hit
+              </ActionBtn>
+              <ActionBtn onClick={playerStand} color="#e67e22" enabled
+                recommended={recAction === 'S'}>
+                Stand
+              </ActionBtn>
+              <ActionBtn onClick={playerDouble} color="#3498db" enabled={canDouble}
+                recommended={recAction === 'D' || recAction === 'd'}>
+                Double
+              </ActionBtn>
+              <ActionBtn onClick={playerSplit} color="#9b59b6" enabled={canSplit}
+                recommended={recAction === 'P'}>
+                Split
+              </ActionBtn>
+            </div>
+          </>
         )
       })()}
 
-      {/* Dealing indicator */}
       {isDealing && (
         <p style={{ textAlign: 'center', color: '#aaa', fontSize: 14 }}>
           Dealing...
@@ -128,16 +153,30 @@ const ControlPanel = () => {
   )
 }
 
-// ---- Tiny local sub-components ----
+// ── Sub-components ───────────────────────────────────────────────
 
-const ActionBtn = ({ onClick, color, enabled = true, children }) => (
+const ActionBtn = ({ onClick, color, enabled = true, recommended = false, children }) => (
   <button onClick={onClick} disabled={!enabled} style={{
     padding: '10px 22px',
     backgroundColor: enabled ? color : '#555',
     color: '#fff', border: 'none', borderRadius: 6,
     cursor: enabled ? 'pointer' : 'not-allowed',
     fontSize: 15, fontWeight: 'bold',
-  }}>{children}</button>
+    boxShadow: recommended ? '0 0 0 3px #ffc220, 0 0 12px rgba(255,194,32,0.4)' : 'none',
+    transform: recommended ? 'scale(1.05)' : 'none',
+    transition: 'box-shadow 0.2s, transform 0.2s',
+    position: 'relative',
+  }}>
+    {children}
+    {recommended && (
+      <span style={{
+        position: 'absolute', top: -8, right: -8,
+        backgroundColor: '#ffc220', color: '#333',
+        fontSize: 9, fontWeight: 'bold',
+        padding: '1px 5px', borderRadius: 6,
+      }}>★</span>
+    )}
+  </button>
 )
 
 const Pill = ({ active, onClick, disabled, children }) => (
