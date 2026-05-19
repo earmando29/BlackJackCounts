@@ -1,399 +1,250 @@
-import { useContext, useState } from 'react'
+import { useContext, useState, useMemo } from 'react'
 import { GameContext } from '../context/GameContext'
-import { loadGameState, getSessions } from '../utils/persistence'
+import { getSessions } from '../utils/persistence'
+import { getRecommendation } from '../utils/strategy'
+import EvAdvisor from './EvAdvisor'
+import ChipBetting from './ChipBetting'
 
 const ControlPanel = () => {
-  const { deck, currentBet, setCurrentBet, gameStatus, resetGame, dealInitialCards, playerHit, playerStand } = useContext(GameContext)
-  const [betAmount, setBetAmount] = useState(10)
+  const {
+    bankroll, gameStatus, numSpots, setNumSpots,
+    dealSpeed, setDealSpeed, dealInitialCards,
+    playerHit, playerStand, playerDouble, playerSplit,
+    resetGame, loadSavedState, saveGame,
+    hands, activeHandIndex, dealerHand, trueCount, selectedSpot,
+    showAdvisor, setShowAdvisor, betAllSpots,
+  } = useContext(GameContext)
+
   const [showLoadMenu, setShowLoadMenu] = useState(false)
   const [savedSessions, setSavedSessions] = useState([])
-  
-  // Load saved sessions when showing load menu
-  const refreshSessions = () => {
-    const sessions = getSessions()
-    setSavedSessions(sessions)
-  }
-  
-  // Load game from saved session
-  const handleLoadGame = (session) => {
-    if (session) {
-      // Reset current game state
-      resetGame()
-      
-      // Load saved state
-      const savedState = session
-      if (savedState) {
-        // Restore game state
-        const { deck: savedDeck, playerHand: savedPlayerHand, dealerHand: savedDealerHand, gameStatus: savedGameStatus, currentBet: savedCurrentBet } = savedState
-        
-        setDeck(savedDeck)
-        setPlayerHand(savedPlayerHand)
-        setDealerHand(savedDealerHand)
-        setGameStatus(savedGameStatus)
-        setCurrentBet(savedCurrentBet)
-        
-        setShowLoadMenu(false)
-        setSavedSessions([])
-      }
+  const [saveFlash, setSaveFlash] = useState(false)
+
+  const isBetting = gameStatus === 'betting'
+  const isPlaying = gameStatus === 'playing'
+  const isDealing = gameStatus === 'dealing'
+  const totalBets = hands.slice(0, numSpots).reduce((s, h) => s + h.bet, 0)
+  const canDeal = isBetting && totalBets > 0 && totalBets <= bankroll
+
+  // Only compute recommendation when advisor is ON
+  const rec = useMemo(() => {
+    if (!isPlaying || !showAdvisor || !dealerHand.length) return null
+    const hand = hands[activeHandIndex]
+    if (!hand?.cards.length) return null
+    const canD = hand.cards.length === 2 && hand.bet <= bankroll
+    const canSp = hand.cards.length === 2
+      && hand.cards[0]?.value === hand.cards[1]?.value
+      && hand.originalBet <= bankroll
+      && hands.filter(h => h.spotIndex === hand.spotIndex).length < 5
+    return getRecommendation(hand.cards, dealerHand[0], trueCount, {
+      canDouble: canD, canSplit: canSp, bet: hand.bet,
+    })
+  }, [isPlaying, showAdvisor, hands, activeHandIndex, dealerHand, trueCount, bankroll])
+
+  // ---- Load ----
+  const handleShowLoad = () => { setSavedSessions(getSessions()); setShowLoadMenu(true) }
+  const handleLoadSession = (s) => { loadSavedState(s); setShowLoadMenu(false) }
+  const handleFileImport = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try { loadSavedState(JSON.parse(ev.target.result)); setShowLoadMenu(false) }
+      catch (err) { alert('Failed: ' + err.message) }
     }
-  }
-  
-  // Handle file import
-  const handleFileImport = (event) => {
-    const file = event.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        try {
-          const state = JSON.parse(e.target.result)
-          // Reset current game state
-          resetGame()
-          
-          // Restore game state
-          const { deck: savedDeck, playerHand: savedPlayerHand, dealerHand: savedDealerHand, gameStatus: savedGameStatus, currentBet: savedCurrentBet } = state
-          
-          setDeck(savedDeck)
-          setPlayerHand(savedPlayerHand)
-          setDealerHand(savedDealerHand)
-          setGameStatus(savedGameStatus)
-          setCurrentBet(savedCurrentBet)
-          
-          alert('Game loaded successfully!')
-        } catch (error) {
-          alert('Failed to load game: ' + error.message)
-        }
-      }
-      reader.readAsText(file)
-    }
+    reader.readAsText(file)
   }
 
-  const handleBet = () => {
-    if (gameStatus === 'betting') {
-      setCurrentBet(betAmount)
-    }
-  }
-
-  const handleClearBet = () => {
-    if (gameStatus === 'betting') {
-      setCurrentBet(0)
-    }
-  }
-
-  const handleDeal = () => {
-    if (gameStatus === 'betting') {
-      dealInitialCards()
-    }
-  }
-
-  const handleStand = () => {
-    if (gameStatus === 'playing') {
-      playerStand()
-    }
-  }
-
-  const handleHit = () => {
-    if (gameStatus === 'playing') {
-      playerHit()
-    }
-  }
-
-  const handleDouble = () => {
-    if (gameStatus === 'playing' && currentBet > 0) {
-      // Double down - double the bet and get one more card
-      const newDeck = { ...deck }
-      const card = drawCard(newDeck)
-      
-      if (card.card) {
-        setDeck(prev => ({
-          ...prev,
-          bankroll: prev.bankroll - currentBet,
-          deck: newDeck.deck
-        }))
-        setPlayerHand(prev => [...prev, card.card])
-        setCurrentBet(0)
-      }
-    }
-  }
-
-  const handleSplit = () => {
-    if (gameStatus === 'playing') {
-      // Split logic would go here
-      alert('Split functionality coming soon!')
-    }
-  }
-
-  const handleInsurance = () => {
-    if (gameStatus === 'playing' && deck.deck[0].rank === 'A') {
-      // Insurance - bet half of current bet on dealer having blackjack
-      const insuranceBet = currentBet / 2
-      if (deck.bankroll >= insuranceBet) {
-        setCurrentBet(prev => prev + insuranceBet)
-        alert(`Insurance bet of $${insuranceBet} placed!`)
-      }
-    }
-  }
+  // Can we show "Bet All" button?
+  const selectedBet = hands[selectedSpot]?.bet ?? 0
+  const showBetAll = isBetting && numSpots > 1 && selectedBet > 0
 
   return (
     <div style={{
-      backgroundColor: '#2d5a3f',
-      borderRadius: '12px',
-      padding: '16px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '12px'
+      backgroundColor: '#2d5a3f', borderRadius: 12, padding: 16,
+      display: 'flex', flexDirection: 'column', gap: 12,
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ color: '#fff', fontSize: '18px' }}>Controls</h3>
-        <span style={{ color: '#4ecdc4', fontSize: '14px' }}>
-          Bankroll: ${deck.bankroll.toFixed(2)}
-        </span>
-        <button
-          onClick={() => {
-            refreshSessions()
-            setShowLoadMenu(true)
-          }}
-          style={{
-            padding: '6px 10px',
-            backgroundColor: '#9b59b6',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-        >
-          Load Game
-        </button>
+      {/* Top row — settings + actions */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', flexWrap: 'wrap', gap: 8,
+      }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ color: '#aaa', fontSize: 12 }}>Spots:</span>
+          {[1, 2, 3].map(n => (
+            <Pill key={n} active={numSpots === n}
+              onClick={() => { if (isBetting) setNumSpots(n) }}
+              disabled={!isBetting}
+            >{n}</Pill>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ color: '#aaa', fontSize: 12 }}>Speed:</span>
+          {[1, 2, 3, 4, 5].map(s => (
+            <Pill key={s} active={dealSpeed === s}
+              onClick={() => setDealSpeed(s)}
+            >{s}</Pill>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          <SmallBtn
+            onClick={() => setShowAdvisor(p => !p)}
+            color={showAdvisor ? '#e67e22' : '#555'}
+          >
+            {showAdvisor ? '🧠 EV On' : '🧠 EV Off'}
+          </SmallBtn>
+          <SmallBtn onClick={() => { saveGame(); setSaveFlash(true); setTimeout(() => setSaveFlash(false), 1200) }} color={saveFlash ? '#2ecc71' : '#3498db'}>
+            {saveFlash ? '✓ Saved' : '💾 Save'}
+          </SmallBtn>
+          <SmallBtn onClick={handleShowLoad} color="#9b59b6">Load</SmallBtn>
+          <SmallBtn onClick={resetGame} color="#e74c3c">Reset</SmallBtn>
+        </div>
       </div>
-      
-      {/* Load Game Menu */}
+
+      {/* Load menu */}
       {showLoadMenu && (
+        <LoadMenu sessions={savedSessions}
+          onLoad={handleLoadSession} onImport={handleFileImport}
+          onClose={() => setShowLoadMenu(false)} />
+      )}
+
+      {/* Chip betting */}
+      {isBetting && (
         <div style={{
-          backgroundColor: '#3d7a57',
-          borderRadius: '8px',
-          padding: '12px',
-          marginTop: '8px'
+          display: 'flex', flexDirection: 'column', gap: 8,
+          alignItems: 'center',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ color: '#fff', fontSize: '14px' }}>Saved Games:</span>
-            <button
-              onClick={() => setShowLoadMenu(false)}
-              style={{
-                padding: '4px 8px',
-                backgroundColor: '#666',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-            >
-              Close
-            </button>
-          </div>
-          
-          {savedSessions.length === 0 ? (
-            <p style={{ color: '#ccc', fontSize: '12px' }}>No saved games found.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {savedSessions.map(session => (
-                <button
-                  key={session.id}
-                  onClick={() => handleLoadGame(session)}
-                  style={{
-                    padding: '6px 10px',
-                    backgroundColor: '#4ecdc4',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    textAlign: 'left'
-                  }}
-                >
-                  {session.timestamp ? new Date(session.timestamp).toLocaleString() : 'Unknown'}
-                </button>
-              ))}
-            </div>
-          )}
-          
-          <div style={{
-            marginTop: '8px',
-            padding: '8px',
-            backgroundColor: '#2d3436',
-            borderRadius: '4px'
-          }}>
-            <label style={{ color: '#fff', fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-              Or import from file:
-            </label>
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleFileImport}
-              style={{
-                fontSize: '12px',
-                padding: '4px'
-              }}
-            />
+          <ChipBetting />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <ActionBtn onClick={dealInitialCards} color="#27ae60" enabled={canDeal}>
+              Deal
+            </ActionBtn>
+            {showBetAll && (
+              <ActionBtn onClick={betAllSpots} color="#3498db" enabled>
+                Bet All ${selectedBet}
+              </ActionBtn>
+            )}
           </div>
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button
-          onClick={handleBet}
-          disabled={gameStatus !== 'betting'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'betting' ? '#4ecdc4' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'betting' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Bet ${betAmount}
-        </button>
+      {/* Playing controls + EV advisor */}
+      {isPlaying && (() => {
+        const hand = hands[activeHandIndex]
+        const canDouble = hand?.cards.length === 2 && hand?.bet <= bankroll
+        const canSplit = hand?.cards.length === 2
+          && hand?.cards[0]?.value === hand?.cards[1]?.value
+          && hand?.originalBet <= bankroll
+          && hands.filter(h => h.spotIndex === hand?.spotIndex).length < 5
 
-        <button
-          onClick={handleClearBet}
-          disabled={gameStatus !== 'betting'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'betting' ? '#ff6b6b' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'betting' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Clear Bet
-        </button>
+        const recAction = rec?.action
+        return (
+          <>
+            <EvAdvisor />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <ActionBtn onClick={playerHit} color="#4ecdc4" enabled
+                recommended={recAction === 'H'}>
+                Hit
+              </ActionBtn>
+              <ActionBtn onClick={playerStand} color="#e67e22" enabled
+                recommended={recAction === 'S'}>
+                Stand
+              </ActionBtn>
+              <ActionBtn onClick={playerDouble} color="#3498db" enabled={canDouble}
+                recommended={recAction === 'D' || recAction === 'd'}>
+                Double
+              </ActionBtn>
+              <ActionBtn onClick={playerSplit} color="#9b59b6" enabled={canSplit}
+                recommended={recAction === 'P'}>
+                Split
+              </ActionBtn>
+            </div>
+          </>
+        )
+      })()}
 
-        <button
-          onClick={handleDeal}
-          disabled={gameStatus !== 'betting'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'betting' ? '#4ecdc4' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'betting' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Deal
-        </button>
-
-        <button
-          onClick={handleHit}
-          disabled={gameStatus !== 'playing'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'playing' ? '#4ecdc4' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'playing' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Hit
-        </button>
-
-        <button
-          onClick={handleStand}
-          disabled={gameStatus !== 'playing'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'playing' ? '#ff6b6b' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'playing' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Stand
-        </button>
-
-        <button
-          onClick={handleDouble}
-          disabled={gameStatus !== 'playing'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'playing' ? '#4ecdc4' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'playing' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Double
-        </button>
-
-        <button
-          onClick={handleSplit}
-          disabled={gameStatus !== 'playing'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'playing' ? '#4ecdc4' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: gameStatus === 'playing' ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Split
-        </button>
-
-        <button
-          onClick={handleInsurance}
-          disabled={gameStatus !== 'playing' || deck.deck[0].rank !== 'A'}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: gameStatus === 'playing' && deck.deck[0].rank === 'A' ? '#ff6b6b' : '#666',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: (gameStatus === 'playing' && deck.deck[0].rank === 'A') ? 'pointer' : 'not-allowed',
-            fontSize: '12px'
-          }}
-        >
-          Insurance
-        </button>
-      </div>
-
-      <div style={{
-        display: 'flex',
-        gap: '8px',
-        alignItems: 'center'
-      }}>
-        <label style={{ color: '#fff', fontSize: '14px' }}>Bet Amount:</label>
-        <input
-          type="number"
-          value={betAmount}
-          onChange={(e) => setBetAmount(Number(e.target.value))}
-          min={1}
-          max={deck.bankroll}
-          style={{
-            padding: '6px 10px',
-            borderRadius: '4px',
-            border: 'none',
-            backgroundColor: '#fff',
-            color: '#333',
-            width: '80px',
-            fontSize: '14px'
-          }}
-        />
-      </div>
+      {isDealing && (
+        <p style={{ textAlign: 'center', color: '#aaa', fontSize: 14 }}>
+          Dealing...
+        </p>
+      )}
     </div>
   )
 }
+
+// ── Sub-components ───────────────────────────────────────────────
+
+const ActionBtn = ({ onClick, color, enabled = true, recommended = false, children }) => (
+  <button onClick={onClick} disabled={!enabled} style={{
+    padding: '10px 22px',
+    backgroundColor: enabled ? color : '#555',
+    color: '#fff', border: 'none', borderRadius: 6,
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontSize: 15, fontWeight: 'bold',
+    boxShadow: recommended ? '0 0 0 3px #ffc220, 0 0 12px rgba(255,194,32,0.4)' : 'none',
+    transform: recommended ? 'scale(1.05)' : 'none',
+    transition: 'box-shadow 0.2s, transform 0.2s',
+    position: 'relative',
+  }}>
+    {children}
+    {recommended && (
+      <span style={{
+        position: 'absolute', top: -8, right: -8,
+        backgroundColor: '#ffc220', color: '#333',
+        fontSize: 9, fontWeight: 'bold',
+        padding: '1px 5px', borderRadius: 6,
+      }}>★</span>
+    )}
+  </button>
+)
+
+const Pill = ({ active, onClick, disabled, children }) => (
+  <button onClick={onClick} disabled={disabled} style={{
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: active ? '#4ecdc4' : '#444',
+    color: '#fff', border: 'none',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13, fontWeight: 'bold',
+    opacity: disabled ? 0.5 : 1,
+  }}>{children}</button>
+)
+
+const SmallBtn = ({ onClick, color, children }) => (
+  <button onClick={onClick} style={{
+    padding: '4px 10px',
+    backgroundColor: color, color: '#fff',
+    border: 'none', borderRadius: 4,
+    cursor: 'pointer', fontSize: 12,
+  }}>{children}</button>
+)
+
+const LoadMenu = ({ sessions, onLoad, onImport, onClose }) => (
+  <div style={{ backgroundColor: '#3d7a57', borderRadius: 8, padding: 12 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+      <span style={{ color: '#fff', fontSize: 14 }}>Saved Games:</span>
+      <SmallBtn onClick={onClose} color="#666">Close</SmallBtn>
+    </div>
+    {sessions.length === 0
+      ? <p style={{ color: '#ccc', fontSize: 12 }}>No saved games.</p>
+      : sessions.map(s => (
+        <button key={s.id} onClick={() => onLoad(s)} style={{
+          display: 'block', width: '100%', textAlign: 'left',
+          padding: '6px 10px', marginBottom: 4,
+          backgroundColor: '#4ecdc4', color: '#fff',
+          border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+        }}>
+          {s.timestamp ? new Date(s.timestamp).toLocaleString() : 'Unknown'}
+        </button>
+      ))
+    }
+    <div style={{ marginTop: 8, padding: 8, backgroundColor: '#2d3436', borderRadius: 4 }}>
+      <label style={{ color: '#fff', fontSize: 12, display: 'block', marginBottom: 4 }}>
+        Import from file:
+      </label>
+      <input type="file" accept=".json" onChange={onImport} style={{ fontSize: 12 }} />
+    </div>
+  </div>
+)
 
 export default ControlPanel
