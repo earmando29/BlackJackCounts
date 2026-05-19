@@ -23,7 +23,7 @@ const CountBadge = ({ card, show }) => {
 
 const GameTable = () => {
   const {
-    dealerHand, gameStatus, numSpots, showCounts,
+    dealerHand, gameStatus, numSpots, showCounts, hands,
     calculateHandValue, newHand,
   } = useContext(GameContext)
 
@@ -31,6 +31,13 @@ const GameTable = () => {
   const dealerValue = calculateHandValue(visibleCards)
   const dealerFullValue = calculateHandValue(dealerHand)
   const showFull = gameStatus === 'finished'
+  const isBetting = gameStatus === 'betting'
+
+  // During betting: show original spots (0..numSpots-1)
+  // During play/finished: show all hands with bets
+  const handIndices = isBetting
+    ? Array.from({ length: numSpots }, (_, i) => i)
+    : hands.map((_, i) => i).filter(i => hands[i].bet > 0)
 
   return (
     <div style={{
@@ -70,8 +77,8 @@ const GameTable = () => {
         display: 'flex', gap: 12, justifyContent: 'center',
         flexWrap: 'wrap',
       }}>
-        {Array.from({ length: numSpots }, (_, i) => (
-          <HandSpot key={i} index={i} />
+        {handIndices.map(i => (
+          <HandSpot key={`${i}-${hands[i]?.spotIndex}`} handIndex={i} />
         ))}
       </div>
 

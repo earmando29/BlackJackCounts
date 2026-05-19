@@ -21,32 +21,52 @@ const CountBadge = ({ card, show }) => {
   )
 }
 
-const HandSpot = ({ index }) => {
+/** Generate a label like "Hand 1", "Hand 1A", "Hand 1B" */
+const getHandLabel = (hand, allHands) => {
+  const spotsForThisSpot = allHands.filter(h => h.spotIndex === hand.spotIndex && h.bet > 0)
+  const base = `Hand ${hand.spotIndex + 1}`
+  if (spotsForThisSpot.length <= 1) return base
+  const letter = String.fromCharCode(65 + spotsForThisSpot.indexOf(hand))
+  return `${base}${letter}`
+}
+
+/**
+ * Renders a single hand — works for both betting slots and in-play hands.
+ * During betting: handIndex === spotIndex (flat 0-2)
+ * During play:    handIndex is position in the dynamic hands array
+ */
+const HandSpot = ({ handIndex }) => {
   const {
     hands, gameStatus, activeHandIndex, selectedSpot,
     setSelectedSpot, numSpots, showCounts, calculateHandValue,
   } = useContext(GameContext)
 
-  if (index >= numSpots) return null
-  const hand = hands[index]
-  const isActive = gameStatus === 'playing' && index === activeHandIndex
-  const isSelected = gameStatus === 'betting' && index === selectedSpot
+  const hand = hands[handIndex]
+  if (!hand) return null
+
+  const isBetting = gameStatus === 'betting'
+  // During betting, hide spots beyond numSpots
+  if (isBetting && hand.spotIndex >= numSpots) return null
+
+  const isActive = gameStatus === 'playing' && handIndex === activeHandIndex
+  const isSelected = isBetting && hand.spotIndex === selectedSpot
   const hasCards = hand.cards.length > 0
   const handValue = hasCards ? calculateHandValue(hand.cards) : 0
+  const label = getHandLabel(hand, hands)
 
   const getResultColor = (result) => {
     if (!result || result === 'stood') return '#fff'
     if (result.startsWith('Win') || result.startsWith('Blackjack')) return '#2ecc71'
     if (result.startsWith('Push')) return '#f1c40f'
-    return '#e74c3c' // Bust, Lose, Dealer BJ
+    return '#e74c3c'
   }
   const resultColor = getResultColor(hand.result)
 
   return (
     <div
-      onClick={() => { if (gameStatus === 'betting') setSelectedSpot(index) }}
+      onClick={() => { if (isBetting) setSelectedSpot(hand.spotIndex) }}
       style={{
-        flex: 1, minWidth: 180, maxWidth: 360,
+        flex: 1, minWidth: 160, maxWidth: 360,
         border: `3px solid ${
           isActive ? '#4ecdc4'
             : isSelected ? '#ffc220'
@@ -54,7 +74,7 @@ const HandSpot = ({ index }) => {
         }`,
         borderRadius: 12, padding: 12,
         backgroundColor: 'rgba(0,0,0,0.15)',
-        cursor: gameStatus === 'betting' ? 'pointer' : 'default',
+        cursor: isBetting ? 'pointer' : 'default',
         animation: isActive ? 'glowPulse 1.8s ease-in-out infinite' : 'none',
         transition: 'border-color 0.25s, box-shadow 0.25s',
       }}
@@ -64,10 +84,15 @@ const HandSpot = ({ index }) => {
         display: 'flex', justifyContent: 'space-between',
         marginBottom: 8, fontSize: 13, color: '#aaa',
       }}>
-        <span>Hand {index + 1}</span>
+        <span>
+          {label}
+          {hand.isSplitHand && (
+            <span style={{ color: '#4ecdc4', marginLeft: 4, fontSize: 10 }}>✂ split</span>
+          )}
+        </span>
         {hand.bet > 0 && (
           <span style={{ color: '#ffc220', fontWeight: 'bold' }}>
-            Bet: ${hand.bet}
+            ${hand.bet}
           </span>
         )}
       </div>

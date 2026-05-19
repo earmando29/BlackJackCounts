@@ -7,7 +7,7 @@ const ControlPanel = () => {
   const {
     bankroll, gameStatus, numSpots, setNumSpots,
     dealSpeed, setDealSpeed, dealInitialCards,
-    playerHit, playerStand, playerDouble,
+    playerHit, playerStand, playerDouble, playerSplit,
     resetGame, loadSavedState, hands, activeHandIndex,
   } = useContext(GameContext)
 
@@ -93,16 +93,26 @@ const ControlPanel = () => {
       )}
 
       {/* Playing controls */}
-      {isPlaying && (
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <ActionBtn onClick={playerHit} color="#4ecdc4" enabled>Hit</ActionBtn>
-          <ActionBtn onClick={playerStand} color="#e67e22" enabled>Stand</ActionBtn>
-          <ActionBtn onClick={playerDouble} color="#3498db"
-            enabled={hands[activeHandIndex]?.bet <= bankroll}>
-            Double
-          </ActionBtn>
-        </div>
-      )}
+      {isPlaying && (() => {
+        const hand = hands[activeHandIndex]
+        const canDouble = hand?.cards.length === 2 && hand?.bet <= bankroll
+        const canSplit = hand?.cards.length === 2
+          && hand?.cards[0]?.value === hand?.cards[1]?.value
+          && hand?.originalBet <= bankroll
+          && hands.filter(h => h.spotIndex === hand?.spotIndex).length < 5
+        return (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <ActionBtn onClick={playerHit} color="#4ecdc4" enabled>Hit</ActionBtn>
+            <ActionBtn onClick={playerStand} color="#e67e22" enabled>Stand</ActionBtn>
+            <ActionBtn onClick={playerDouble} color="#3498db" enabled={canDouble}>
+              Double
+            </ActionBtn>
+            <ActionBtn onClick={playerSplit} color="#9b59b6" enabled={canSplit}>
+              Split
+            </ActionBtn>
+          </div>
+        )
+      })()}
 
       {/* Dealing indicator */}
       {isDealing && (
