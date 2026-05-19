@@ -8,11 +8,12 @@ const ControlPanel = () => {
     bankroll, gameStatus, numSpots, setNumSpots,
     dealSpeed, setDealSpeed, dealInitialCards,
     playerHit, playerStand, playerDouble, playerSplit,
-    resetGame, loadSavedState, hands, activeHandIndex,
+    resetGame, loadSavedState, saveGame, hands, activeHandIndex,
   } = useContext(GameContext)
 
   const [showLoadMenu, setShowLoadMenu] = useState(false)
   const [savedSessions, setSavedSessions] = useState([])
+  const [saveFlash, setSaveFlash] = useState(false)
 
   const isBetting = gameStatus === 'betting'
   const isPlaying = gameStatus === 'playing'
@@ -67,6 +68,9 @@ const ControlPanel = () => {
 
         {/* Utility buttons */}
         <div style={{ display: 'flex', gap: 6 }}>
+          <SmallBtn onClick={() => { saveGame(); setSaveFlash(true); setTimeout(() => setSaveFlash(false), 1200) }} color={saveFlash ? '#2ecc71' : '#3498db'}>
+            {saveFlash ? '✓ Saved' : '💾 Save'}
+          </SmallBtn>
           <SmallBtn onClick={handleShowLoad} color="#9b59b6">Load</SmallBtn>
           <SmallBtn onClick={resetGame} color="#e74c3c">Reset</SmallBtn>
         </div>

@@ -1,19 +1,19 @@
 import { createContext, useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import useDeck from '../hooks/useDeck'
-import { saveGameState, loadGameState } from '../utils/persistence'
+import { saveGameState, loadGameState, saveSession } from '../utils/persistence'
 import {
   calculateHandValue, getCountDelta, dealerPlayOut, SPEED_MAP,
 } from '../utils/gameLogic'
 
 export const GameContext = createContext(null)
 
+const TOTAL_CARDS = 6 * 52 // 312 cards in a 6-deck shoe
+
 const emptyHand = (spotIndex = 0) => ({
   cards: [], bet: 0, originalBet: 0, result: '',
   spotIndex, isSplitHand: false,
 })
 const makeHands = () => [emptyHand(0), emptyHand(1), emptyHand(2)]
-
-// Max hands from one spot (4 splits = 5 hands)
 const MAX_SPLIT_HANDS = 5
 
 export const GameProvider = ({ children }) => {
@@ -31,6 +31,11 @@ export const GameProvider = ({ children }) => {
   const [activeHandIndex, setActiveHandIndex] = useState(0)
   const [totalBuyIn, setTotalBuyIn] = useState(saved?.totalBuyIn ?? 1000)
 
+  // --- Round tracking ---
+  const [bankrollAtDeal, setBankrollAtDeal] = useState(0)
+  const [handHistory, setHandHistory] = useState(saved?.handHistory ?? [])
+  const [reviewingRound, setReviewingRound] = useState(null)
+
   // --- Settings ---
   const [numSpots, setNumSpots] = useState(saved?.numSpots ?? 1)
   const [selectedSpot, setSelectedSpot] = useState(0)
@@ -41,11 +46,16 @@ export const GameProvider = ({ children }) => {
   const decksRemaining = Math.max(1, Math.ceil(cards.length / 52))
   const trueCount = Math.round((runningCount / decksRemaining) * 10) / 10
   const speedMs = SPEED_MAP[dealSpeed] ?? 280
+  const roundNet = gameStatus === 'finished' ? bankroll - bankrollAtDeal : null
+
+  // Discard count = total cards - shoe - in-play cards
+  const inPlayCount = hands.reduce((n, h) => n + h.cards.length, 0) + dealerHand.length
+  const discardCount = Math.max(0, TOTAL_CARDS - cards.length - inPlayCount)
 
   // Clear bets beyond numSpots when spots shrink
   useEffect(() => {
     if (gameStatus === 'betting') {
-      setHands(prev => prev.map((h, i) =>
+      setHands(prev => prev.map(h =>
         h.spotIndex >= numSpots ? { ...h, bet: 0 } : h
       ))
       if (selectedSpot >= numSpots) setSelectedSpot(0)
@@ -57,10 +67,10 @@ export const GameProvider = ({ children }) => {
     if (gameStatus === 'betting') {
       saveGameState({
         cards, hands, dealerHand, bankroll,
-        runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn,
+        runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory,
       })
     }
-  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn])
+  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory])
 
   // ---- helpers ----
   const addToCount = useCallback((revealed) => {
@@ -159,6 +169,8 @@ export const GameProvider = ({ children }) => {
     const totalBets = activeSlots.reduce((s, h) => s + h.bet, 0)
     if (totalBets > bankroll) return
 
+    // Snapshot bankroll BEFORE deductions for round-net calc
+    setBankrollAtDeal(bankroll)
     setBankroll(prev => prev - totalBets)
     setGameStatus('dealing')
 
@@ -195,7 +207,6 @@ export const GameProvider = ({ children }) => {
 
     setTimeout(() => {
       if (dealIdRef.current !== id) return
-
       const dVal = calculateHandValue(newDealer)
       const dealerBJ = dVal === 21 && newDealer.length === 2
       const updated = newHands.map(h => ({ ...h }))
@@ -301,61 +312,52 @@ export const GameProvider = ({ children }) => {
     if (hand.cards.length !== 2) return
     if (hand.cards[0].value !== hand.cards[1].value) return
 
-    // Check split limit for this spot
     const spotCount = hands.filter(h => h.spotIndex === hand.spotIndex).length
     if (spotCount >= MAX_SPLIT_HANDS) return
 
     const bet = hand.originalBet
     if (bet > bankroll) return
-
     const isAces = hand.cards[0].rank === 'A'
 
-    // Deduct matching bet for the new hand
     setBankroll(prev => prev - bet)
-
-    // Draw two cards (one per split hand)
     const shoe = ensureShoe(cards, 2)
     const card1 = { ...shoe.shift(), flipped: true, dealOrder: 0 }
     const card2 = { ...shoe.shift(), flipped: true, dealOrder: 0 }
     setCards(shoe)
     addToCount([card1, card2])
 
-    // Build the two split hands
-    const hand1 = {
-      ...hand,
-      cards: [hand.cards[0], card1],
-      bet,
-      result: isAces ? 'stood' : '',
-    }
+    const hand1 = { ...hand, cards: [hand.cards[0], card1], bet, result: isAces ? 'stood' : '' }
     const hand2 = {
-      cards: [hand.cards[1], card2],
-      bet,
-      originalBet: bet,
-      result: isAces ? 'stood' : '',
-      spotIndex: hand.spotIndex,
-      isSplitHand: true,
+      cards: [hand.cards[1], card2], bet, originalBet: bet,
+      result: isAces ? 'stood' : '', spotIndex: hand.spotIndex, isSplitHand: true,
     }
 
-    // Splice: replace current hand with hand1, insert hand2 right after
     const updated = [...hands]
     updated[activeHandIndex] = hand1
     updated.splice(activeHandIndex + 1, 0, hand2)
 
-    if (isAces) {
-      // Split aces auto-stand — advance past both
-      advanceToNextHand(updated, shoe, dealerHand)
-    } else {
-      // Stay on activeHandIndex (play first split hand)
-      setHands(updated)
-    }
+    if (isAces) advanceToNextHand(updated, shoe, dealerHand)
+    else setHands(updated)
   }, [gameStatus, activeHandIndex, hands, bankroll, cards, dealerHand, ensureShoe, addToCount, advanceToNextHand])
 
   // ---- New hand / Reset ----
   const newHand = useCallback(() => {
     dealIdRef.current++
+
+    // Push completed round to history (only if we actually played)
+    if (dealerHand.length > 0) {
+      setHandHistory(prev => [...prev, {
+        handNumber: prev.length + 1,
+        dealerHand: dealerHand.map(c => ({ ...c, flipped: true })),
+        playerHands: hands.filter(h => h.bet > 0).map(h => ({ ...h })),
+        roundNet: bankroll - bankrollAtDeal,
+        runningCount,
+        timestamp: new Date().toISOString(),
+      }])
+    }
+
     if (cards.length < 60) { setCards(createDeck()); setRunningCount(0) }
 
-    // Collapse splits back to original spots, restore originalBet
     const spotBets = new Map()
     for (const h of hands) {
       if (!spotBets.has(h.spotIndex)) spotBets.set(h.spotIndex, h.originalBet ?? 0)
@@ -370,7 +372,8 @@ export const GameProvider = ({ children }) => {
     setDealerHand([])
     setGameStatus('betting')
     setActiveHandIndex(0)
-  }, [cards, hands, createDeck])
+    setReviewingRound(null)
+  }, [cards, hands, dealerHand, bankroll, bankrollAtDeal, runningCount, createDeck])
 
   const resetGame = useCallback(() => {
     dealIdRef.current++
@@ -383,7 +386,26 @@ export const GameProvider = ({ children }) => {
     setGameStatus('betting')
     setActiveHandIndex(0)
     setSelectedSpot(0)
+    setHandHistory([])
+    setReviewingRound(null)
+    setBankrollAtDeal(0)
   }, [createDeck])
+
+  // ---- Save / History ----
+  const saveGame = useCallback(() => {
+    saveSession({
+      cards, hands, dealerHand, bankroll,
+      runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory,
+    })
+  }, [cards, hands, dealerHand, bankroll, runningCount, gameStatus, numSpots, dealSpeed, totalBuyIn, handHistory])
+
+  const viewHistoryRound = useCallback((index) => {
+    if (index >= 0 && index < handHistory.length) {
+      setReviewingRound(handHistory[index])
+    }
+  }, [handHistory])
+
+  const exitHistoryView = useCallback(() => setReviewingRound(null), [])
 
   const loadSavedState = useCallback((state) => {
     if (!state) return
@@ -395,8 +417,10 @@ export const GameProvider = ({ children }) => {
     setTotalBuyIn(state.totalBuyIn ?? state.bankroll ?? 1000)
     setRunningCount(state.runningCount ?? 0)
     setGameStatus(state.gameStatus ?? 'betting')
+    setHandHistory(state.handHistory ?? [])
     setActiveHandIndex(0)
     setSelectedSpot(0)
+    setReviewingRound(null)
     if (state.numSpots) setNumSpots(state.numSpots)
     if (state.dealSpeed) setDealSpeed(state.dealSpeed)
   }, [createDeck])
@@ -412,19 +436,23 @@ export const GameProvider = ({ children }) => {
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
+    roundNet, discardCount, handHistory, reviewingRound,
     setNumSpots, setSelectedSpot, setDealSpeed, setShowCounts,
     addChip, clearBet, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble, playerSplit,
-    newHand, resetGame, loadSavedState,
+    newHand, resetGame, loadSavedState, saveGame,
+    viewHistoryRound, exitHistoryView,
     calculateHandValue,
   }), [
     cards, hands, dealerHand, bankroll, totalBuyIn,
     runningCount, trueCount, gameStatus,
     activeHandIndex, numSpots, selectedSpot,
     dealSpeed, showCounts, speedMs, theme,
+    roundNet, discardCount, handHistory, reviewingRound,
     addChip, clearBet, dealInitialCards, rebuy,
     playerHit, playerStand, playerDouble, playerSplit,
-    newHand, resetGame, loadSavedState,
+    newHand, resetGame, loadSavedState, saveGame,
+    viewHistoryRound, exitHistoryView,
   ])
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>

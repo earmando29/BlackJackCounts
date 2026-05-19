@@ -2,6 +2,7 @@ import { GameProvider } from './context/GameContext'
 import GameTable from './components/GameTable'
 import ControlPanel from './components/ControlPanel'
 import BankrollDisplay from './components/BankrollDisplay'
+import HandHistory from './components/HandHistory'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <BankrollDisplay />
         <GameTable />
         <ControlPanel />
+        <HandHistory />
       </div>
     </GameProvider>
   )
