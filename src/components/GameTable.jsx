@@ -1,155 +1,131 @@
-import { useContext, useState } from 'react'
+import { useContext } from 'react'
 import { GameContext } from '../context/GameContext'
+import { getHiLoValue } from '../hooks/useDeck'
 import Card from './Card'
 
+/** Small badge showing the Hi-Lo value of a single card. */
+const CountBadge = ({ card }) => {
+  if (!card?.flipped) return null
+  const v = getHiLoValue(card.rank)
+  const bg = v > 0 ? '#27ae60' : v < 0 ? '#e74c3c' : '#7f8c8d'
+
+  return (
+    <div style={{
+      position: 'absolute', top: -22, left: '50%',
+      transform: 'translateX(-50%)',
+      backgroundColor: bg, color: '#fff',
+      padding: '1px 6px', borderRadius: 10,
+      fontSize: 10, fontWeight: 'bold', whiteSpace: 'nowrap',
+    }}>
+      {v > 0 ? '+' : ''}{v}
+    </div>
+  )
+}
+
 const GameTable = () => {
-  const { deck, playerHand, dealerHand, gameStatus, resetGame } = useContext(GameContext)
+  const {
+    playerHand, dealerHand, gameStatus,
+    resultMessage, calculateHandValue,
+    dealInitialCards, newHand,
+  } = useContext(GameContext)
 
-  const getCardCount = (card) => {
-    if (!card) return 0
-    return card.value
-  }
+  const playerValue = calculateHandValue(playerHand)
+  const dealerValue = calculateHandValue(
+    dealerHand.filter(c => c.flipped) // only count face-up cards for display
+  )
+  const dealerFullValue = calculateHandValue(dealerHand)
 
-  const getCardInfo = (card) => {
-    if (!card) return null
-    const count = getCardCount(card)
-    return (
-      <div style={{
-        position: 'absolute',
-        top: '-30px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        backgroundColor: count > 0 ? '#ff6b6b' : count < 0 ? '#4ecdc4' : '#666',
-        color: '#fff',
-        padding: '2px 6px',
-        borderRadius: '10px',
-        fontSize: '10px',
-        fontWeight: 'bold'
-      }}>
-        {count > 0 ? '+' : ''}{count}
-      </div>
-    )
-  }
+  const showDealerFull = gameStatus === 'finished'
 
   return (
     <div style={{
       backgroundColor: '#1a472a',
-      borderRadius: '16px',
-      padding: '20px',
-      minHeight: '400px',
-      position: 'relative'
+      borderRadius: 16, padding: 20,
+      minHeight: 400, position: 'relative',
+      marginBottom: 12,
     }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '20px'
-      }}>
-        <h2 style={{ color: '#fff', fontSize: '24px' }}>Dealer</h2>
-        <h2 style={{ color: '#fff', fontSize: '24px' }}>Player</h2>
-      </div>
-
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-end',
-        gap: '10px'
-      }}>
-        <div style={{ display: 'flex', gap: '8px', flex: 1 }}>
-          {dealerHand.map((card, index) => (
-            <div key={index} style={{ position: 'relative' }}>
+      {/* Dealer section */}
+      <div style={{ marginBottom: 40 }}>
+        <h2 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>
+          Dealer {dealerHand.length > 0 && (
+            <span style={{ fontSize: 14, color: '#aaa' }}>
+              ({showDealerFull ? dealerFullValue : dealerValue})
+            </span>
+          )}
+        </h2>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {dealerHand.map((card, i) => (
+            <div key={i} style={{ position: 'relative' }}>
+              <CountBadge card={card} />
               <Card card={card} />
-              {getCardInfo(card)}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: '8px', flex: 1 }}>
-          {playerHand.map((card, index) => (
-            <div key={index} style={{ position: 'relative' }}>
-              <Card card={card} />
-              {getCardInfo(card)}
             </div>
           ))}
         </div>
       </div>
 
-      {gameStatus === 'betting' && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: 'rgba(0,0,0,0.8)',
-          padding: '20px 40px',
-          borderRadius: '12px',
-          textAlign: 'center'
-        }}>
-          <p style={{ fontSize: '20px', marginBottom: '10px' }}>Place your bet</p>
-          <button
-            onClick={resetGame}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#4ecdc4',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '16px'
-            }}
-          >
-            Deal Cards
-          </button>
+      {/* Player section */}
+      <div>
+        <h2 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>
+          Player {playerHand.length > 0 && (
+            <span style={{ fontSize: 14, color: '#aaa' }}>
+              ({playerValue})
+            </span>
+          )}
+        </h2>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {playerHand.map((card, i) => (
+            <div key={i} style={{ position: 'relative' }}>
+              <CountBadge card={card} />
+              <Card card={card} />
+            </div>
+          ))}
         </div>
-      )}
+      </div>
 
-      {gameStatus === 'playing' && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: 'rgba(0,0,0,0.8)',
-          padding: '20px 40px',
-          borderRadius: '12px',
-          textAlign: 'center'
-        }}>
-          <p style={{ fontSize: '20px', marginBottom: '10px' }}>Game in progress...</p>
-        </div>
+      {/* Overlays */}
+      {gameStatus === 'betting' && playerHand.length === 0 && (
+        <Overlay>
+          <p style={{ fontSize: 20, marginBottom: 10 }}>Place your bet below, then deal!</p>
+        </Overlay>
       )}
 
       {gameStatus === 'finished' && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: 'rgba(0,0,0,0.8)',
-          padding: '20px 40px',
-          borderRadius: '12px',
-          textAlign: 'center'
-        }}>
-          <p style={{ fontSize: '20px', marginBottom: '10px' }}>
-            {gameStatus === 'finished' ? 'Game Over!' : ''}
+        <Overlay>
+          <p style={{
+            fontSize: 22, marginBottom: 12, fontWeight: 'bold',
+            color: resultMessage.includes('win') || resultMessage.includes('Blackjack!')
+              ? '#2ecc71' : resultMessage.includes('Push') ? '#f1c40f' : '#e74c3c',
+          }}>
+            {resultMessage}
           </p>
-          <button
-            onClick={resetGame}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#4ecdc4',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '16px'
-            }}
-          >
-            New Game
+          <button onClick={newHand} style={btnStyle}>
+            Next Hand
           </button>
-        </div>
+        </Overlay>
       )}
     </div>
   )
+}
+
+const Overlay = ({ children }) => (
+  <div style={{
+    position: 'absolute', top: '50%', left: '50%',
+    transform: 'translate(-50%, -50%)',
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    padding: '24px 40px', borderRadius: 12,
+    textAlign: 'center', color: '#fff',
+    zIndex: 10,
+  }}>
+    {children}
+  </div>
+)
+
+const btnStyle = {
+  padding: '10px 24px',
+  backgroundColor: '#4ecdc4',
+  color: '#fff', border: 'none',
+  borderRadius: 6, cursor: 'pointer',
+  fontSize: 16, fontWeight: 'bold',
 }
 
 export default GameTable
