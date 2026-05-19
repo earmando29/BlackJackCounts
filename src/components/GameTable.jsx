@@ -2,20 +2,19 @@ import { useContext } from 'react'
 import { GameContext } from '../context/GameContext'
 import { getHiLoValue } from '../hooks/useDeck'
 import Card from './Card'
+import HandSpot from './HandSpot'
 
-/** Small badge showing the Hi-Lo value of a single card. */
-const CountBadge = ({ card }) => {
-  if (!card?.flipped) return null
+const CountBadge = ({ card, show }) => {
+  if (!show || !card?.flipped) return null
   const v = getHiLoValue(card.rank)
   const bg = v > 0 ? '#27ae60' : v < 0 ? '#e74c3c' : '#7f8c8d'
-
   return (
     <div style={{
-      position: 'absolute', top: -22, left: '50%',
+      position: 'absolute', top: -20, left: '50%',
       transform: 'translateX(-50%)',
       backgroundColor: bg, color: '#fff',
       padding: '1px 6px', borderRadius: 10,
-      fontSize: 10, fontWeight: 'bold', whiteSpace: 'nowrap',
+      fontSize: 10, fontWeight: 'bold',
     }}>
       {v > 0 ? '+' : ''}{v}
     </div>
@@ -24,108 +23,78 @@ const CountBadge = ({ card }) => {
 
 const GameTable = () => {
   const {
-    playerHand, dealerHand, gameStatus,
-    resultMessage, calculateHandValue,
-    dealInitialCards, newHand,
+    dealerHand, gameStatus, numSpots, showCounts,
+    calculateHandValue, newHand,
   } = useContext(GameContext)
 
-  const playerValue = calculateHandValue(playerHand)
-  const dealerValue = calculateHandValue(
-    dealerHand.filter(c => c.flipped) // only count face-up cards for display
-  )
+  const visibleCards = dealerHand.filter(c => c.flipped)
+  const dealerValue = calculateHandValue(visibleCards)
   const dealerFullValue = calculateHandValue(dealerHand)
-
-  const showDealerFull = gameStatus === 'finished'
+  const showFull = gameStatus === 'finished'
 
   return (
     <div style={{
       backgroundColor: '#1a472a',
       borderRadius: 16, padding: 20,
-      minHeight: 400, position: 'relative',
+      minHeight: 460, position: 'relative',
       marginBottom: 12,
     }}>
-      {/* Dealer section */}
-      <div style={{ marginBottom: 40 }}>
+      {/* Dealer */}
+      <div style={{ marginBottom: 24 }}>
         <h2 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>
-          Dealer {dealerHand.length > 0 && (
+          Dealer{' '}
+          {dealerHand.length > 0 && (
             <span style={{ fontSize: 14, color: '#aaa' }}>
-              ({showDealerFull ? dealerFullValue : dealerValue})
+              ({showFull ? dealerFullValue : dealerValue})
             </span>
           )}
         </h2>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {dealerHand.map((card, i) => (
-            <div key={i} style={{ position: 'relative' }}>
-              <CountBadge card={card} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minHeight: 112 }}>
+          {dealerHand.map(card => (
+            <div key={card.id} style={{ position: 'relative' }}>
+              <CountBadge card={card} show={showCounts} />
               <Card card={card} />
             </div>
           ))}
         </div>
       </div>
 
-      {/* Player section */}
-      <div>
-        <h2 style={{ color: '#fff', fontSize: 20, marginBottom: 8 }}>
-          Player {playerHand.length > 0 && (
-            <span style={{ fontSize: 14, color: '#aaa' }}>
-              ({playerValue})
-            </span>
-          )}
-        </h2>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {playerHand.map((card, i) => (
-            <div key={i} style={{ position: 'relative' }}>
-              <CountBadge card={card} />
-              <Card card={card} />
-            </div>
-          ))}
-        </div>
+      {/* Divider */}
+      <div style={{
+        borderTop: '2px dashed rgba(255,255,255,0.15)',
+        margin: '12px 0 16px',
+      }} />
+
+      {/* Player hand spots */}
+      <div style={{
+        display: 'flex', gap: 12, justifyContent: 'center',
+        flexWrap: 'wrap',
+      }}>
+        {Array.from({ length: numSpots }, (_, i) => (
+          <HandSpot key={i} index={i} />
+        ))}
       </div>
 
-      {/* Overlays */}
-      {gameStatus === 'betting' && playerHand.length === 0 && (
-        <Overlay>
-          <p style={{ fontSize: 20, marginBottom: 10 }}>Place your bet below, then deal!</p>
-        </Overlay>
-      )}
-
+      {/* Finished overlay */}
       {gameStatus === 'finished' && (
-        <Overlay>
-          <p style={{
-            fontSize: 22, marginBottom: 12, fontWeight: 'bold',
-            color: resultMessage.includes('win') || resultMessage.includes('Blackjack!')
-              ? '#2ecc71' : resultMessage.includes('Push') ? '#f1c40f' : '#e74c3c',
+        <div style={{
+          position: 'absolute', bottom: 16, left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+        }}>
+          <button onClick={newHand} style={{
+            padding: '12px 32px',
+            backgroundColor: '#4ecdc4', color: '#fff',
+            border: 'none', borderRadius: 8,
+            cursor: 'pointer', fontSize: 16, fontWeight: 'bold',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
           }}>
-            {resultMessage}
-          </p>
-          <button onClick={newHand} style={btnStyle}>
             Next Hand
           </button>
-        </Overlay>
+        </div>
       )}
     </div>
   )
-}
-
-const Overlay = ({ children }) => (
-  <div style={{
-    position: 'absolute', top: '50%', left: '50%',
-    transform: 'translate(-50%, -50%)',
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    padding: '24px 40px', borderRadius: 12,
-    textAlign: 'center', color: '#fff',
-    zIndex: 10,
-  }}>
-    {children}
-  </div>
-)
-
-const btnStyle = {
-  padding: '10px 24px',
-  backgroundColor: '#4ecdc4',
-  color: '#fff', border: 'none',
-  borderRadius: 6, cursor: 'pointer',
-  fontSize: 16, fontWeight: 'bold',
 }
 
 export default GameTable
