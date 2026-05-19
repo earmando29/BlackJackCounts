@@ -1,0 +1,17 @@
+node_modules
+.git
+.gitignore
+.DS_Store
+docs/
+coverage
+*.log
+.vscode
+.idea
+.env
+.env.*
+src/
+package.json
+package-lock.json
+vite.config.js
+AGENT.md
+README.md
